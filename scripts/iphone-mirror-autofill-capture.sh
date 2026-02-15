@@ -669,11 +669,11 @@ click_rel() {
 	local point
 
 	point="$(rel_to_abs "$rx" "$ry")" || return 1
-	read -r ax ay <<<"$point"
+	read -r ax ay <<<"$(printf "%s" "$point" | tr ',' ' ')"
 	rx="$(printf "%s" "$rx" | tr -d '[:space:],')"
 	ry="$(printf "%s" "$ry" | tr -d '[:space:],')"
-	ax="$(printf "%s" "$ax" | tr -d '[:space:],')"
-	ay="$(printf "%s" "$ay" | tr -d '[:space:],')"
+	ax="$(printf "%s" "$ax" | tr -d '[:space:]')"
+	ay="$(printf "%s" "$ay" | tr -d '[:space:]')"
 
 	if [[ -z "$ax" || -z "$ay" || ! "$ax" =~ ^-?[0-9]+$ || ! "$ay" =~ ^-?[0-9]+$ ]]; then
 		die "Invalid click coordinates for rel (${rx}, ${ry}) => abs (${ax}, ${ay})"
@@ -693,12 +693,12 @@ drag_rel() {
 
 	start_point="$(rel_to_abs "$start_rx" "$start_ry")" || return 1
 	end_point="$(rel_to_abs "$end_rx" "$end_ry")" || return 1
-	read -r sx sy <<<"$start_point"
-	read -r ex ey <<<"$end_point"
-	sx="$(printf "%s" "$sx" | tr -d '[:space:],')"
-	sy="$(printf "%s" "$sy" | tr -d '[:space:],')"
-	ex="$(printf "%s" "$ex" | tr -d '[:space:],')"
-	ey="$(printf "%s" "$ey" | tr -d '[:space:],')"
+	read -r sx sy <<<"$(printf "%s" "$start_point" | tr ',' ' ')"
+	read -r ex ey <<<"$(printf "%s" "$end_point" | tr ',' ' ')"
+	sx="$(printf "%s" "$sx" | tr -d '[:space:]')"
+	sy="$(printf "%s" "$sy" | tr -d '[:space:]')"
+	ex="$(printf "%s" "$ex" | tr -d '[:space:]')"
+	ey="$(printf "%s" "$ey" | tr -d '[:space:]')"
 
 	if [[ -z "$sx" || -z "$sy" || -z "$ex" || -z "$ey" || ! "$sx" =~ ^-?[0-9]+$ || ! "$sy" =~ ^-?[0-9]+$ || ! "$ex" =~ ^-?[0-9]+$ || ! "$ey" =~ ^-?[0-9]+$ ]]; then
 		die "Invalid drag coordinates: ${start_rx},${start_ry} => ${end_rx},${end_ry} produced ${sx},${sy} => ${ex},${ey}"
