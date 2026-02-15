@@ -110,6 +110,145 @@ log_payload() {
 	fi
 }
 
+get_frontmost_process() {
+	local script
+	local out
+	script=$(
+		cat <<'OSASCRIPT'
+tell application "System Events"
+	try
+		return (name of first process whose frontmost is true as text)
+	on error
+		return "unknown"
+	end try
+end tell
+OSASCRIPT
+	)
+
+	if ! out="$(osascript_eval "$script" 2>&1)"; then
+		echo "unknown"
+		return 1
+	fi
+
+	echo "$out"
+}
+
+log_frontmost_state() {
+	local phase="$1"
+	local front_process
+	front_process="$(get_frontmost_process || echo "unknown")"
+	log_step "frontmost(${phase}): ${front_process}"
+
+	if [[ "$front_process" == "$MIRROR_APP_NAME" || "$front_process" == "$MIRROR_APP_FALLBACK" ]]; then
+		if ! mirror_bounds="$(get_mirror_window_bounds 2>/dev/null)"; then
+			log_step "frontmost(${phase}): mirror bounds unavailable"
+		else
+			log_step "frontmost(${phase}): mirror bounds ${mirror_bounds}"
+		fi
+	fi
+}
+
+ensure_mirror_frontmost() {
+	local phase="${1:-focus}"
+	local attempt
+	local max_attempts=6
+	local front_process
+
+	for attempt in $(seq 1 "$max_attempts"); do
+		front_process="$(get_frontmost_process || echo "unknown")"
+		log_step "ensure_mirror_frontmost(${phase}): attempt ${attempt}/${max_attempts} frontmost=${front_process}"
+
+		if [[ "$front_process" == "$MIRROR_APP_NAME" || "$front_process" == "$MIRROR_APP_FALLBACK" ]]; then
+			return 0
+		fi
+
+		focus_mirroring || true
+		sleep 0.15
+	done
+
+	front_process="$(get_frontmost_process || echo "unknown")"
+	log_step "ensure_mirror_frontmost(${phase}): failed, final frontmost=${front_process}"
+	return 1
+}
+
+send_host_keystroke() {
+	local key_text="$1"
+	local modifiers_raw="${2:-}"
+	local context="${3:-keystroke}"
+	local normalized_modifiers
+	local modifiers_array
+	local modifier_token
+	local -a modifier_list
+	local modifier_payload=""
+	local script
+	local escaped_key
+	local modifier
+
+	if [[ -z "$key_text" ]]; then
+		die "send_host_keystroke(${context}) requires a key text"
+	fi
+
+	if ! ensure_mirror_frontmost "${context}"; then
+		log_step "send_host_keystroke(${context}): mirror host was not frontmost"
+		return 1
+	fi
+
+	escaped_key="${key_text//\\/\\\\}"
+	escaped_key="${escaped_key//\"/\\\"}"
+
+	if [[ -n "$modifiers_raw" ]]; then
+		normalized_modifiers="$(trim "$modifiers_raw")"
+		IFS=',' read -r -a modifiers_array <<<"$normalized_modifiers"
+		for modifier in "${modifiers_array[@]}"; do
+			case "$(trim "$modifier")" in
+			"") ;;
+			command | cmd | commanddown)
+				modifier_list+=("command down")
+				;;
+			control | ctrl)
+				modifier_list+=("control down")
+				;;
+			option | alt | optiondown)
+				modifier_list+=("option down")
+				;;
+			shift)
+				modifier_list+=("shift down")
+				;;
+			*)
+				die "Unsupported modifier token '${modifier}' in send_host_keystroke(${context})"
+				;;
+			esac
+		done
+
+		if ((${#modifier_list[@]} > 0)); then
+			modifier_payload="$(
+				IFS=', '
+				echo "${modifier_list[*]}"
+			)"
+		fi
+	fi
+
+	if [[ -n "$modifier_payload" ]]; then
+		script="tell application \"System Events\" to keystroke \"${escaped_key}\" using {${modifier_payload}}"
+	else
+		script="tell application \"System Events\" to keystroke \"${escaped_key}\""
+	fi
+
+	if ! osascript_eval "$script" >/dev/null; then
+		log_step "send_host_keystroke(${context}): key event failed"
+		return 1
+	fi
+
+	if ! ensure_mirror_frontmost "${context}:post"; then
+		focus_mirroring || true
+		sleep 0.1
+		ensure_mirror_frontmost "${context}:post-retry" || return 1
+	fi
+
+	log_step "send_host_keystroke(${context}): sent '${key_text}' with modifiers='${modifier_payload}'"
+	return 0
+}
+
 mirroring_connection_hint() {
 	cat <<'EOF' >&2
 If the phone is not actively mirrored, complete the iPhone Mirroring connection flow on-screen:
@@ -564,6 +703,7 @@ OSASCRIPT
 focus_mirroring() {
 	local candidate
 	log_step "focus_mirroring: attempting to activate a mirroring host window"
+	log_frontmost_state "before-focus"
 	for candidate in "$MIRROR_APP_NAME" "$MIRROR_APP_FALLBACK"; do
 		if [[ -z "$candidate" ]]; then
 			continue
@@ -571,6 +711,7 @@ focus_mirroring() {
 		log_step "focus_mirroring: trying '${candidate}'"
 		if osascript_eval "tell application \"${candidate}\" to activate" >/dev/null 2>&1; then
 			log_step "focus_mirroring: activated '${candidate}'"
+			log_frontmost_state "after-focus-${candidate}"
 			return
 		fi
 	done
@@ -742,6 +883,11 @@ apply_abs_click_point() {
 	local ax ay
 	local region
 
+	log_frontmost_state "before-apply-abs-click"
+	if ! ensure_mirror_frontmost "apply-abs-click-${label}"; then
+		die "Failed to ensure mirroring host is frontmost for ${label}"
+	fi
+
 	point="$(rel_to_abs "$rx" "$ry" "$label")" || return 1
 	region="$(get_content_region)" || return 1
 	parsed_point="$(parse_abs_point "$point" "$rx" "$ry" "$label" "$region")" || return 1
@@ -791,6 +937,11 @@ tap_sequence() {
 	local step
 	local rx ry
 
+	log_frontmost_state "tap-sequence:pre"
+	if ! ensure_mirror_frontmost "tap-sequence"; then
+		die "Could not ensure mirror host before tap sequence."
+	fi
+
 	for step in $steps; do
 		[[ -z "$step" ]] && continue
 		rx="${step%,*}"
@@ -801,10 +952,27 @@ tap_sequence() {
 }
 
 clear_field() {
+	log_frontmost_state "clear-field:pre"
+	if ! ensure_mirror_frontmost "clear-field"; then
+		die "Could not guarantee iPhone mirroring host is frontmost before clearing search."
+	fi
+
 	case "$CLEAR_MODE" in
 	select_all)
-		osascript -e 'tell application "System Events" to keystroke "a" using {command down}' >/dev/null
-		cliclick "kp:delete" >/dev/null
+		if send_host_keystroke "a" "command" "select_all"; then
+			cliclick "kp:delete" >/dev/null
+		else
+			log_step "clear_field: select-all failed, falling back to backspace-mode"
+			local fallback_count="$BACKSPACE_COUNT"
+			if ! [[ "$fallback_count" =~ ^[0-9]+$ ]]; then
+				fallback_count=40
+			fi
+			local i=0
+			while ((i < fallback_count)); do
+				cliclick "kp:delete" >/dev/null
+				i=$((i + 1))
+			done
+		fi
 		;;
 	backspace:*)
 		local count
@@ -839,7 +1007,12 @@ screenshot_content() {
 }
 
 go_home_best_effort() {
-	osascript -e 'tell application "System Events" to keystroke "h" using {command down}' >/dev/null || true
+	log_frontmost_state "go-home:pre"
+	if send_host_keystroke "h" "command" "go-home-key"; then
+		log_step "go_home_best_effort: command+H issued"
+	else
+		log_step "go_home_best_effort: command+H failed; continuing with swipe-only fallback"
+	fi
 	sleep 0.4
 	drag_rel 0.50 0.96 0.50 0.55 || true
 	sleep 0.4
@@ -849,7 +1022,15 @@ open_app_from_home() {
 	local icon_rx="$1"
 	local icon_ry="$2"
 
+	log_frontmost_state "open-app:pre"
+	if ! ensure_mirror_frontmost "open-app-from-home"; then
+		die "Could not ensure mirror host before opening app."
+	fi
+
 	go_home_best_effort
+	if ! ensure_mirror_frontmost "open-app:before-icon-tap"; then
+		die "Could not ensure mirror host before app icon tap."
+	fi
 	click_rel "$icon_rx" "$icon_ry"
 	sleep "$APP_OPEN_DELAY_SEC"
 }
@@ -879,6 +1060,10 @@ type_and_capture_per_char() {
 	screenshot_content "${outdir}/${app}_00_empty_${query_slug}.png"
 
 	while ((i < len)); do
+		if ! ensure_mirror_frontmost "type-char-${app}"; then
+			die "Could not ensure mirror host during character typing at index ${i}."
+		fi
+
 		ch="${query:i:1}"
 		encoded="$(escape_tap_text "$ch")"
 		cliclick "t:${encoded}" >/dev/null
@@ -901,6 +1086,10 @@ run_app_flow() {
 
 	focus_mirroring
 	sleep 0.2
+	if ! ensure_mirror_frontmost "run-app-${app}"; then
+		die "Could not return focus to mirror host for ${app} flow."
+	fi
+	log_frontmost_state "run-app:post-focus"
 
 	case "$app" in
 	chrome)
