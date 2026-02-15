@@ -117,6 +117,7 @@ If the phone is not actively mirrored, complete the iPhone Mirroring connection 
  - Tap "Connect" (or equivalent) to establish the Mirroring session
  - Wait until the phone UI is visible in the window before rerunning this script
  - If the UI is visible but automation still fails, verify:
+   - Prefer using the macOS Terminal.app for initial Automation/Accessibility permission prompts
    - System Settings > Privacy & Security > Accessibility includes your terminal app
    - System Settings > Privacy & Security > Automation allows your terminal app to control System Events and iPhone Mirroring
 EOF

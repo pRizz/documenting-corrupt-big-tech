@@ -10,7 +10,8 @@ typed into Chrome, Instagram, and TikTok.
 
 - macOS with iPhone Mirroring open
 - Accessibility + Screen Recording enabled for your terminal application
-- If you run via an embedded terminal (Cursor, editors, etc.), grant permissions to that app too.
+- Use the stock macOS Terminal.app (recommended first) for permission prompts; some embedded terminals can fail to receive Automation prompts reliably.
+- If using an embedded terminal (Cursor, editors, etc.), grant permissions to that app too.
 - `cliclick` (install with `brew install cliclick`)
 
 ### Run
@@ -48,6 +49,7 @@ just print-window
 - Use `--coord-to-rel X Y` while hovering over mirrored points for fine-tuning taps.
 - If automation fails, rerun after adjusting coordinates and delays.
 - If you see connection errors in an embedded terminal, run the command from macOS Terminal.app after enabling `Accessibility` and `Automation` for Terminal and `System Events`.
+- If using Terminal.app, keep it as the default runner for the initial permission grant flow.
 - For mirror detection issues, run with verbose tracing to show each probe step:
   - `PRINT_WINDOW_DEBUG=1 ./scripts/iphone-mirror-autofill-capture.sh --print-window`
 - If tracing shows no readable bounds while the phone UI is visible, verify on-screen:
