@@ -803,7 +803,8 @@ tap_sequence() {
 clear_field() {
 	case "$CLEAR_MODE" in
 	select_all)
-		cliclick "kp:cmd-a" "kp:delete" >/dev/null
+		osascript -e 'tell application "System Events" to keystroke "a" using {command down}' >/dev/null
+		cliclick "kp:delete" >/dev/null
 		;;
 	backspace:*)
 		local count
@@ -838,7 +839,7 @@ screenshot_content() {
 }
 
 go_home_best_effort() {
-	cliclick "kp:cmd-h" >/dev/null || true
+	osascript -e 'tell application "System Events" to keystroke "h" using {command down}' >/dev/null || true
 	sleep 0.4
 	drag_rel 0.50 0.96 0.50 0.55 || true
 	sleep 0.4
