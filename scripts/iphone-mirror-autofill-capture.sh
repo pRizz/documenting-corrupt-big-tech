@@ -63,6 +63,7 @@ Utility:
   --print-window         Print iPhone mirroring window bounds and computed content bounds
   --calibrate            Capture a crop preview of the current phone content region
   --coord-to-rel X Y     Convert absolute screen coordinates to relative (0..1)
+  --point-check RX RY     Validate relative-to-absolute conversion for debug
   -h, --help             Print this help text
 
 Requirements:
@@ -622,25 +623,58 @@ get_content_region() {
 	echo "$cx $cy $cw $ch"
 }
 
+validate_rel_token() {
+	local label="$1"
+	local token="$2"
+
+	token="$(trim "$token")"
+
+	if [[ -z "$token" ]]; then
+		die "Invalid relative token for ${label}: empty"
+	fi
+
+	if ! [[ "$token" =~ ^[+-]?([0-9]+\.?[0-9]*|[0-9]*\.[0-9]+)$ ]]; then
+		die "Invalid relative token for ${label}: '${token}'"
+	fi
+
+	printf "%s" "$token"
+}
+
 rel_to_abs() {
 	local rx="$1"
 	local ry="$2"
-	local cx cy cw ch ax ay
+	local cx cy cw ch
 	local region
+	local rel_payload
+	local validated_rx
+	local validated_ry
 
 	if ! region="$(get_content_region)"; then
 		return 1
 	fi
 
 	IFS=' ' read -r cx cy cw ch <<<"$region"
+	if ! [[ "$cx" =~ ^-?[0-9]+$ && "$cy" =~ ^-?[0-9]+$ && "$cw" =~ ^-?[0-9]+$ && "$ch" =~ ^-?[0-9]+$ ]]; then
+		die "Invalid content region values returned by get_content_region: '${region}'"
+	fi
 
-	awk -v cx="$cx" -v cy="$cy" -v cw="$cw" -v ch="$ch" -v rx="$rx" -v ry="$ry" '
+	validated_rx="$(validate_rel_token "rx" "$rx")" || return 1
+	validated_ry="$(validate_rel_token "ry" "$ry")" || return 1
+	log_payload "rel_to_abs raw rel input" "rx=${validated_rx} ry=${validated_ry}"
+	log_payload "rel_to_abs region" "x=${cx} y=${cy} w=${cw} h=${ch}"
+
+	rel_payload="$(awk -v cx="$cx" -v cy="$cy" -v cw="$cw" -v ch="$ch" -v rx="$validated_rx" -v ry="$validated_ry" '
 		BEGIN {
 			x = cx + (cw * rx)
 			y = cy + (ch * ry)
-			printf "%.0f %.0f", x, y
+			printf "%.0f|%.0f", x, y
 		}
-	'
+	')"
+	log_payload "rel_to_abs raw output" "$rel_payload"
+	if ! [[ "$rel_payload" =~ ^-?[0-9]+\|-?[0-9]+$ ]]; then
+		die "rel_to_abs produced invalid payload '${rel_payload}' from rel (${validated_rx}, ${validated_ry}) in region (${region})"
+	fi
+	echo "$rel_payload"
 }
 
 abs_to_rel() {
@@ -662,24 +696,76 @@ abs_to_rel() {
   '
 }
 
+parse_abs_point() {
+	local point="$1"
+	local rel_rx="$2"
+	local rel_ry="$3"
+	local label="${4:-point}"
+	local region="${5:-}"
+	local region_hint=""
+
+	point="$(trim "$point")"
+	if [[ -z "$point" ]]; then
+		[[ -n "$region" ]] && region_hint=" while checking region ${region}"
+		die "Empty point payload while parsing ${label} for rel (${rel_rx}, ${rel_ry})${region_hint}"
+	fi
+
+	if ! [[ "$point" =~ ^-?[0-9]+\|-?[0-9]+$ ]]; then
+		[[ -n "$region" ]] && region_hint=" while checking region ${region}"
+		die "Invalid point payload '${point}' while parsing ${label} for rel (${rel_rx}, ${rel_ry})${region_hint}"
+	fi
+
+	local px py
+	IFS='|' read -r px py <<<"$point"
+	if [[ -z "$px" || -z "$py" ]]; then
+		[[ -n "$region" ]] && region_hint=" while checking region ${region}"
+		die "Malformed point payload '${point}' while parsing ${label} for rel (${rel_rx}, ${rel_ry})${region_hint}"
+	fi
+
+	if ! [[ "$px" =~ ^-?[0-9]+$ && "$py" =~ ^-?[0-9]+$ ]]; then
+		[[ -n "$region" ]] && region_hint=" while checking region ${region}"
+		die "Non-integer parsed point payload '${point}' while parsing ${label} for rel (${rel_rx}, ${rel_ry})${region_hint}"
+	fi
+
+	log_payload "parse_abs_point (${label})" "rel=${rel_rx},${rel_ry} point=${point} ${region_hint}"
+	echo "${px}|${py}"
+}
+
+apply_abs_click_point() {
+	local rx="$1"
+	local ry="$2"
+	local event="${3:-c}"
+	local label="${4:-point}"
+	local point
+	local parsed_point
+	local cx cy cw ch
+	local ax ay
+	local region
+
+	point="$(rel_to_abs "$rx" "$ry" "$label")" || return 1
+	region="$(get_content_region)" || return 1
+	parsed_point="$(parse_abs_point "$point" "$rx" "$ry" "$label" "$region")" || return 1
+	log_payload "apply_abs_click_point raw payload" "$parsed_point"
+
+	IFS='|' read -r ax ay <<<"$parsed_point"
+	log_step "apply_abs_click_point(${label}): ${event} ${ax},${ay} from rel ${rx},${ry}"
+	if ! [[ "$ax" =~ ^-?[0-9]+$ && "$ay" =~ ^-?[0-9]+$ ]]; then
+		die "Invalid click coordinates for rel (${rx}, ${ry}) => abs (${ax}, ${ay})"
+	fi
+
+	IFS=' ' read -r cx cy cw ch <<<"$region"
+	if ((ax < cx || ax > cx + cw || ay < cy || ay > cy + ch)); then
+		log_step "apply_abs_click_point(${label}): point is outside computed content (${cx},${cy},${cw},${ch})"
+	fi
+
+	cliclick "${event}:${ax},${ay}" >/dev/null
+	echo "${ax}|${ay}"
+}
+
 click_rel() {
 	local rx="$1"
 	local ry="$2"
-	local ax ay
-	local point
-
-	point="$(rel_to_abs "$rx" "$ry")" || return 1
-	read -r ax ay <<<"$(printf "%s" "$point" | tr ',' ' ')"
-	rx="$(printf "%s" "$rx" | tr -d '[:space:],')"
-	ry="$(printf "%s" "$ry" | tr -d '[:space:],')"
-	ax="$(printf "%s" "$ax" | tr -d '[:space:]')"
-	ay="$(printf "%s" "$ay" | tr -d '[:space:]')"
-
-	if [[ -z "$ax" || -z "$ay" || ! "$ax" =~ ^-?[0-9]+$ || ! "$ay" =~ ^-?[0-9]+$ ]]; then
-		die "Invalid click coordinates for rel (${rx}, ${ry}) => abs (${ax}, ${ay})"
-	fi
-	log_step "click_rel: absolute target ${ax},${ay} from rel ${rx},${ry}"
-	cliclick "c:${ax},${ay}" >/dev/null
+	apply_abs_click_point "$rx" "$ry" "c" "click" >/dev/null
 }
 
 drag_rel() {
@@ -688,25 +774,15 @@ drag_rel() {
 	local end_rx="$3"
 	local end_ry="$4"
 
-	local sx sy ex ey
 	local start_point end_point
+	local sx sy ex ey
 
-	start_point="$(rel_to_abs "$start_rx" "$start_ry")" || return 1
-	end_point="$(rel_to_abs "$end_rx" "$end_ry")" || return 1
-	read -r sx sy <<<"$(printf "%s" "$start_point" | tr ',' ' ')"
-	read -r ex ey <<<"$(printf "%s" "$end_point" | tr ',' ' ')"
-	sx="$(printf "%s" "$sx" | tr -d '[:space:]')"
-	sy="$(printf "%s" "$sy" | tr -d '[:space:]')"
-	ex="$(printf "%s" "$ex" | tr -d '[:space:]')"
-	ey="$(printf "%s" "$ey" | tr -d '[:space:]')"
-
-	if [[ -z "$sx" || -z "$sy" || -z "$ex" || -z "$ey" || ! "$sx" =~ ^-?[0-9]+$ || ! "$sy" =~ ^-?[0-9]+$ || ! "$ex" =~ ^-?[0-9]+$ || ! "$ey" =~ ^-?[0-9]+$ ]]; then
-		die "Invalid drag coordinates: ${start_rx},${start_ry} => ${end_rx},${end_ry} produced ${sx},${sy} => ${ex},${ey}"
-	fi
-
+	start_point="$(apply_abs_click_point "$start_rx" "$start_ry" "dd" "drag-start")"
+	end_point="$(apply_abs_click_point "$end_rx" "$end_ry" "m" "drag-end-move")"
+	IFS='|' read -r sx sy <<<"$start_point"
+	IFS='|' read -r ex ey <<<"$end_point"
 	log_step "drag_rel: absolute start ${sx},${sy} end ${ex},${ey}"
-
-	cliclick "dd:${sx},${sy}" "m:${ex},${ey}" "du:${ex},${ey}" >/dev/null
+	cliclick "du:${ex},${ey}" >/dev/null
 }
 
 tap_sequence() {
@@ -921,6 +997,21 @@ while [[ $# -gt 0 ]]; do
 		need_cmd osascript "This command is built into macOS."
 		need_cmd awk "This command is built into macOS."
 		abs_to_rel "$2" "$3"
+		exit 0
+		;;
+	--point-check)
+		if [[ $# -lt 3 ]]; then
+			die "--point-check requires RX and RY"
+		fi
+		need_cmd osascript "This command is built into macOS."
+		need_cmd awk "This command is built into macOS."
+		need_cmd screencapture "This command is built into macOS."
+		log_step "Running point-check diagnostics"
+		point="$(rel_to_abs "$2" "$3")" || exit 1
+		region="$(get_content_region)" || exit 1
+		parsed_point="$(parse_abs_point "$point" "$2" "$3" "point-check" "$region")" || exit 1
+		IFS='|' read -r px py <<<"$parsed_point"
+		echo "rel (${2}, ${3}) => abs (${px}, ${py})"
 		exit 0
 		;;
 	-h | --help)

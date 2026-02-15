@@ -38,9 +38,12 @@ just print-window
 1. `just preflight`
 2. `just check-mirror`
 3. If needed: `just check-mirror debug=1`
-4. `just calibrate` (or `--calibrate`) to validate the cropped content area
-5. `just sanity-capture query="a"` for a one-app, minimal capture check
-6. `just capture-all query="..."` once input and taps are stable
+4. Use strict coordinate checks while calibrating:
+   - `PRINT_WINDOW_DEBUG=1 ./scripts/iphone-mirror-autofill-capture.sh --print-window`
+   - `just point-check 0.50 0.10` (replace with any rel coordinate under test)
+5. `just calibrate` (or `--calibrate`) to validate the cropped content area
+6. `just sanity-capture query="a"` for a one-app, minimal capture check
+7. `just capture-all query="..."` once input and taps are stable
 
 ### Notes
 
@@ -52,6 +55,7 @@ just print-window
 - If using Terminal.app, keep it as the default runner for the initial permission grant flow.
 - For mirror detection issues, run with verbose tracing to show each probe step:
   - `PRINT_WINDOW_DEBUG=1 ./scripts/iphone-mirror-autofill-capture.sh --print-window`
+- The conversion pipeline is now strict-validated; debug output includes raw rel inputs, computed absolute points, and parsed click payloads when failures occur.
 - If tracing shows no readable bounds while the phone UI is visible, verify on-screen:
   - select your device in iPhone Mirroring
   - accept pairing prompts on the phone (including passcode)

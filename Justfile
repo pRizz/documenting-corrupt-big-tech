@@ -82,3 +82,6 @@ calibrate:
 
 coord-to-rel x y:
   @{{SCRIPT}} --coord-to-rel "{{x}}" "{{y}}"
+
+point-check rx ry:
+  @{{SCRIPT}} --point-check "{{rx}}" "{{ry}}"
