@@ -634,10 +634,13 @@ rel_to_abs() {
 
 	IFS=' ' read -r cx cy cw ch <<<"$region"
 
-	ax="$(awk -v cx="$cx" -v cw="$cw" -v rx="$rx" 'BEGIN { printf "%.0f", cx + (cw * rx) }')"
-	ay="$(awk -v cy="$cy" -v ch="$ch" -v ry="$ry" 'BEGIN { printf "%.0f", cy + (ch * ry) }')"
-
-	echo "$ax $ay"
+	awk -v cx="$cx" -v cy="$cy" -v cw="$cw" -v ch="$ch" -v rx="$rx" -v ry="$ry" '
+		BEGIN {
+			x = cx + (cw * rx)
+			y = cy + (ch * ry)
+			printf "%.0f %.0f", x, y
+		}
+	'
 }
 
 abs_to_rel() {
@@ -663,8 +666,19 @@ click_rel() {
 	local rx="$1"
 	local ry="$2"
 	local ax ay
+	local point
 
-	read -r ax ay < <(rel_to_abs "$rx" "$ry")
+	point="$(rel_to_abs "$rx" "$ry")" || return 1
+	read -r ax ay <<<"$point"
+	rx="$(printf "%s" "$rx" | tr -d '[:space:],')"
+	ry="$(printf "%s" "$ry" | tr -d '[:space:],')"
+	ax="$(printf "%s" "$ax" | tr -d '[:space:],')"
+	ay="$(printf "%s" "$ay" | tr -d '[:space:],')"
+
+	if [[ -z "$ax" || -z "$ay" || ! "$ax" =~ ^-?[0-9]+$ || ! "$ay" =~ ^-?[0-9]+$ ]]; then
+		die "Invalid click coordinates for rel (${rx}, ${ry}) => abs (${ax}, ${ay})"
+	fi
+	log_step "click_rel: absolute target ${ax},${ay} from rel ${rx},${ry}"
 	cliclick "c:${ax},${ay}" >/dev/null
 }
 
@@ -675,8 +689,22 @@ drag_rel() {
 	local end_ry="$4"
 
 	local sx sy ex ey
-	read -r sx sy < <(rel_to_abs "$start_rx" "$start_ry")
-	read -r ex ey < <(rel_to_abs "$end_rx" "$end_ry")
+	local start_point end_point
+
+	start_point="$(rel_to_abs "$start_rx" "$start_ry")" || return 1
+	end_point="$(rel_to_abs "$end_rx" "$end_ry")" || return 1
+	read -r sx sy <<<"$start_point"
+	read -r ex ey <<<"$end_point"
+	sx="$(printf "%s" "$sx" | tr -d '[:space:],')"
+	sy="$(printf "%s" "$sy" | tr -d '[:space:],')"
+	ex="$(printf "%s" "$ex" | tr -d '[:space:],')"
+	ey="$(printf "%s" "$ey" | tr -d '[:space:],')"
+
+	if [[ -z "$sx" || -z "$sy" || -z "$ex" || -z "$ey" || ! "$sx" =~ ^-?[0-9]+$ || ! "$sy" =~ ^-?[0-9]+$ || ! "$ex" =~ ^-?[0-9]+$ || ! "$ey" =~ ^-?[0-9]+$ ]]; then
+		die "Invalid drag coordinates: ${start_rx},${start_ry} => ${end_rx},${end_ry} produced ${sx},${sy} => ${ex},${ey}"
+	fi
+
+	log_step "drag_rel: absolute start ${sx},${sy} end ${ex},${ey}"
 
 	cliclick "dd:${sx},${sy}" "m:${ex},${ey}" "du:${ex},${ey}" >/dev/null
 }
