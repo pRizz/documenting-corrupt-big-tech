@@ -39,6 +39,9 @@ preflight:
 pre-commit:
   @bun run pre-commit
 
+install-hooks:
+  @scripts/install-hooks.sh
+
 check-mirror debug="0":
   @if [ "{{debug}}" = "1" ]; then \
     PRINT_WINDOW_DEBUG=1 {{SCRIPT}} -- --print-window; \

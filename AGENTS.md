@@ -16,13 +16,21 @@ Default to using Bun instead of Node.js.
 
 ## Pre-commit
 
-Before committing, run:
+Commit-time enforcement is available via the local hook at `.githooks/pre-commit`.
+
+One-time setup:
+
+```sh
+just install-hooks
+```
+
+The hook runs this command automatically:
 
 ```sh
 bun run pre-commit
 ```
 
-or
+If you prefer to run manually:
 
 ```sh
 just pre-commit

@@ -46,6 +46,27 @@ bun run check-mirror
 bun run sanity-capture -- --query "a"
 ```
 
+### Developer workflow (pre-commit)
+
+Install the local commit hook once per clone:
+
+```bash
+just install-hooks
+```
+
+After setup, each commit runs:
+
+```bash
+bun run pre-commit
+```
+
+You can also run it manually at any time:
+
+```bash
+bun run pre-commit
+just pre-commit
+```
+
 ### Pre-action delay and logging verbosity
 
 Capture flow now includes a stabilization pause before app actions:
@@ -214,6 +235,7 @@ just capture-tiktok query="pizza"
 just preflight
 just check-mirror
 just check-mirror debug=1
+just install-hooks
 just calibrate
 just calibrate-all
 just calibrate-action app=chrome action=searchBar

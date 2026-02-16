@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+set -eu
+
+if ! command -v bun >/dev/null 2>&1; then
+  echo "pre-commit hook failed: Bun is not installed or not in PATH." >&2
+  echo "Install Bun and rerun: https://bun.sh" >&2
+  exit 1
+fi
+
+bun run pre-commit
