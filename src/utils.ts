@@ -56,8 +56,8 @@ export const INSET_BOTTOM = 10;
 
 export const COORD_SCALE = 1;
 
-export const CHAR_DELAY_SEC = 0.25;
-export const APP_OPEN_DELAY_SEC = 1.0;
+export const CHAR_DELAY_SEC = 4;
+export const APP_OPEN_DELAY_SEC = 4;
 
 export const BASE_COORDINATES_FILE = "./calibration/base-coordinates.json";
 

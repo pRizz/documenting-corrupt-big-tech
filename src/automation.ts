@@ -622,7 +622,7 @@ export class AutofillAutomation {
 			}
 
 			this.focusMirroring();
-			await sleep(0.15);
+			await sleepAfterAction("frontmost-retry");
 		}
 
 		const frontProcess = this.getFrontmostProcess();
@@ -684,7 +684,7 @@ export class AutofillAutomation {
 
 		if (!(await this.ensureMirrorFrontmost(`${context}:post`))) {
 			this.focusMirroring();
-			await sleep(0.1);
+			await sleepAfterAction("post-keystroke-focus-restore");
 			if (!(await this.ensureMirrorFrontmost(`${context}:post-retry`))) {
 				die(`Could not return mirroring host to frontmost after keystroke.`);
 			}
@@ -1150,7 +1150,7 @@ export class AutofillAutomation {
 
 		for (const [x, y] of parseTapSteps(steps, "tap-sequence")) {
 			await this.clickRel(x, y);
-			await sleep(0.15);
+			await sleepAfterAction("tap-sequence-step");
 		}
 	}
 
@@ -1197,7 +1197,7 @@ export class AutofillAutomation {
 
 		for (const ch of text) {
 			this.runCliclick(`t:${escapeTapText(ch)}`);
-			await sleep(0.1);
+			await sleep(CHAR_DELAY_SEC);
 		}
 	}
 
@@ -1331,8 +1331,7 @@ export class AutofillAutomation {
 		const appDir = `${outBase}/${app}`;
 		this.focusMirroring();
 		logAction(`Starting app flow for ${app} (query="${query}", outBase="${outBase}")`);
-		await sleep(0.2);
-		await sleepAfterAction("focus-mirroring");
+		await sleepAfterAction("focus-mirroring-init");
 		if (!(await this.ensureMirrorFrontmost(`run-app-${app}`))) {
 			die(`Could not return focus to mirror host for ${app} flow.`);
 		}
