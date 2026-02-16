@@ -119,7 +119,7 @@ export const CAPTURE_PRE_ACTION_DELAY_SEC = (() => {
 
 export const CAPTURE_STEP_GAP_SEC = (() => {
 	const raw = process.env.CAPTURE_STEP_GAP_SEC;
-	const defaultDelay = 0.45;
+	const defaultDelay = 4;
 	if (raw === undefined || raw.length === 0) {
 		return defaultDelay;
 	}
