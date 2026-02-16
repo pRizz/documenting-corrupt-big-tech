@@ -78,7 +78,10 @@ function logAction(message: string): void {
 }
 
 async function sleepAfterAction(label: string, delaySec = CAPTURE_STEP_GAP_SEC): Promise<void> {
-	if (delaySec <= 0) return;
+	if (delaySec <= 0) {
+		logAction(`Skipping wait after ${label} because delay is ${delaySec}s`);
+		return;
+	}
 	logAction(`Waiting ${delaySec}s after ${label}...`);
 	await sleep(delaySec);
 }
@@ -614,10 +617,12 @@ export class AutofillAutomation {
 	}
 
 	private async ensureMirrorFrontmost(phase: string): Promise<boolean> {
+		logAction(`ensureMirrorFrontmost(${phase}): start`);
 		for (let attempt = 1; attempt <= 6; attempt += 1) {
 			const frontProcess = this.getFrontmostProcess();
-			logStep(`ensure_mirror_frontmost(${phase}): attempt ${attempt}/6 frontmost=${frontProcess}`);
+			logAction(`ensureMirrorFrontmost(${phase}): attempt ${attempt}/6 frontmost=${frontProcess}`);
 			if (frontProcess === MIRROR_APP_NAME || frontProcess === MIRROR_APP_FALLBACK) {
+				logAction(`ensureMirrorFrontmost(${phase}): success on attempt ${attempt}`);
 				return true;
 			}
 
@@ -626,17 +631,18 @@ export class AutofillAutomation {
 		}
 
 		const frontProcess = this.getFrontmostProcess();
-		logStep(`ensure_mirror_frontmost(${phase}): failed, final frontmost=${frontProcess}`);
+		logAction(`ensureMirrorFrontmost(${phase}): failed, final frontmost=${frontProcess}`);
 		return false;
 	}
 
 	private async sendHostKeystroke(keyText: string, modifiersRaw = "", context = "keystroke"): Promise<boolean> {
+		logAction(`sendHostKeystroke(${context}): key='${keyText}' modifiers='${modifiersRaw}'`);
 		if (!keyText) {
 			die(`send_host_keystroke(${context}) requires a key text`);
 		}
 
 		if (!(await this.ensureMirrorFrontmost(context))) {
-			logStep(`send_host_keystroke(${context}): mirror host was not frontmost`);
+			logAction(`sendHostKeystroke(${context}): mirror host was not frontmost before send`);
 			return false;
 		}
 
@@ -677,12 +683,14 @@ export class AutofillAutomation {
 
 		try {
 			runOsa(script);
+			logAction(`sendHostKeystroke(${context}): script dispatched`);
 		} catch {
-			logStep(`send_host_keystroke(${context}): key event failed`);
+			logAction(`sendHostKeystroke(${context}): key event failed`);
 			return false;
 		}
 
 		if (!(await this.ensureMirrorFrontmost(`${context}:post`))) {
+			logAction(`sendHostKeystroke(${context}): post-check failed, re-focusing host`);
 			this.focusMirroring();
 			await sleepAfterAction("post-keystroke-focus-restore");
 			if (!(await this.ensureMirrorFrontmost(`${context}:post-retry`))) {
@@ -690,7 +698,7 @@ export class AutofillAutomation {
 			}
 		}
 
-		logStep(`send_host_keystroke(${context}): sent '${keyText}' with modifiers='${modifierPayload}'`);
+		logAction(`sendHostKeystroke(${context}): sent '${keyText}' with modifiers='${modifierPayload}'`);
 		return true;
 	}
 
@@ -1219,24 +1227,31 @@ export class AutofillAutomation {
 	}
 
 	private async openAppBySearch(app: SupportedApp): Promise<void> {
+		logAction(`openAppBySearch(${app}): begin`);
 		const appName = APP_LAUNCH_QUERY[app];
 		const searchPoint = this.getSearchButtonProfilePoint();
 		const launchPoint = this.getLaunchResultProfilePoint();
 
 		logAction(`Opening ${app} via Search flow`);
+		logAction(`openAppBySearch(${app}): checking initial frontmost`);
 		if (!(await this.ensureMirrorFrontmost("open-app-by-search:initial-focus"))) {
 			die("Could not ensure mirror host before search launch.");
 		}
+		logAction(`openAppBySearch(${app}): initial frontmost ok`);
 		await sleepAfterAction("before-go-home");
+		logAction(`openAppBySearch(${app}): entering goHomeBestEffort`);
 		await this.goHomeBestEffort();
+		logAction(`openAppBySearch(${app}): goHomeBestEffort complete`);
 		await sleepAfterAction("post-go-home");
 		await sleepAfterAction("before-search-tap");
 
 		if (!(await this.ensureMirrorFrontmost("open-app-by-search:search-button"))) {
 			die("Could not ensure mirror host before tapping Search.");
 		}
+		logAction(`openAppBySearch(${app}): search-button frontmost ok`);
 		logAction("Tapping Search icon");
 		await this.clickRel(searchPoint.relX, searchPoint.relY);
+		logAction(`openAppBySearch(${app}): search icon tapped`);
 		await sleepAfterAction("search-icon-tap");
 		await sleepAfterAction("search-icon-to-clear");
 		logAction("Clearing Search field");
@@ -1248,14 +1263,18 @@ export class AutofillAutomation {
 		await sleepAfterAction("typing-to-launch");
 		logAction("Tapping launch result");
 		await this.clickRel(launchPoint.relX, launchPoint.relY);
+		logAction(`openAppBySearch(${app}): launch-result tapped`);
 		await sleepAfterAction("launch-result-tap");
 		await sleep(APP_OPEN_DELAY_SEC);
+		logAction(`openAppBySearch(${app}): complete`);
 	}
 
 	private async openAppBySearchWithFallback(app: SupportedApp): Promise<void> {
 		logAction(`Starting app launch for ${app}`);
 		try {
+			logAction(`openAppBySearchWithFallback(${app}): trying search flow`);
 			await this.openAppBySearch(app);
+			logAction(`openAppBySearchWithFallback(${app}): search flow succeeded`);
 			return;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -1342,18 +1361,21 @@ export class AutofillAutomation {
 
 		switch (app) {
 			case "chrome":
+				logAction(`runAppFlow(${app}): entering chrome flow`);
 				await this.openAppBySearchWithFallback("chrome");
 				await this.tapSequence(steps);
 				await this.clearField();
 				await this.typeAndCapturePerChar("chrome", query, appDir, querySlug);
 				break;
 			case "instagram":
+				logAction(`runAppFlow(${app}): entering instagram flow`);
 				await this.openAppBySearchWithFallback("instagram");
 				await this.tapSequence(steps);
 				await this.clearField();
 				await this.typeAndCapturePerChar("instagram", query, appDir, querySlug);
 				break;
 			case "tiktok":
+				logAction(`runAppFlow(${app}): entering tiktok flow`);
 				await this.openAppBySearchWithFallback("tiktok");
 				await this.tapSequence(steps);
 				await this.clearField();
