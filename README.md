@@ -217,6 +217,10 @@ bun run capture -- --debug-calibrate-all
 
 For each high-level step, it logs the expected next action, waits for Enter to execute, then asks for `p` (pass) or `f` (fail). App launch transitions are expanded into hierarchical launch sub-steps (for example `4.1`, `4.2`, `4.3`) so typing/submission behavior is visible before execution.
 
+Right before every `p/f` prompt, debug mode now captures a checkpoint screenshot and prints its path:
+
+- `calibration/debug-checkpoints/debug-calibrate-all-<seq>-step-...png`
+
 After the Home Search button step, launch uses a context-gated active-Search path first when Search is known to be focused; if that path fails, it falls back to the standard autonomous launch attempts.
 
 Because debug prompts are acknowledged from Terminal, the launch executor now force-refocuses iPhone Mirroring before every launch sub-step (all flows), then records frontmost-process probes in failure reports.

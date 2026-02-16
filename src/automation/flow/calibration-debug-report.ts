@@ -13,6 +13,7 @@ export interface StepSnapshot {
 	kind: string;
 	label: string;
 	expected: string;
+	checkpointScreenshotPath?: string;
 	definitionId?: string;
 	app?: string;
 	action?: string;
@@ -31,6 +32,7 @@ export interface LaunchSubStepSnapshot {
 	attemptNumber?: number;
 	attemptMode?: string;
 	contextHint: string;
+	checkpointScreenshotPath?: string;
 	ensurePhase?: string;
 	ensuredFrontmost?: boolean;
 	frontmostBeforeFocus?: string;
@@ -258,6 +260,9 @@ export function printFailureSummary(report: DebugCalibrateFailureReport, reportP
 	if (report.subStep) {
 		console.error(`[debug-calibrate-all] Sub-step: ${report.subStep.displayIndex} (${report.subStep.id})`);
 		console.error(`[debug-calibrate-all] Expected: ${report.subStep.expected}`);
+		if (report.subStep.checkpointScreenshotPath) {
+			console.error(`[debug-calibrate-all] Checkpoint screenshot: ${report.subStep.checkpointScreenshotPath}`);
+		}
 		if (report.subStep.ensurePhase) {
 			console.error(`[debug-calibrate-all] Launch focus phase: ${report.subStep.ensurePhase}`);
 		}
@@ -279,6 +284,9 @@ export function printFailureSummary(report: DebugCalibrateFailureReport, reportP
 	} else if (report.mainStep) {
 		console.error(`[debug-calibrate-all] Step: ${report.mainStep.index}/${report.mainStep.total} (${report.mainStep.id})`);
 		console.error(`[debug-calibrate-all] Expected: ${report.mainStep.expected}`);
+		if (report.mainStep.checkpointScreenshotPath) {
+			console.error(`[debug-calibrate-all] Checkpoint screenshot: ${report.mainStep.checkpointScreenshotPath}`);
+		}
 	}
 	console.error(`[debug-calibrate-all] Failure kind: ${report.failureKind}`);
 	console.error(`[debug-calibrate-all] Operator verdict: ${report.operatorVerdict}`);
