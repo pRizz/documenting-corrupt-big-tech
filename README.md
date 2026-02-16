@@ -40,6 +40,7 @@ bun run capture -- --calibrate
 bun run capture -- --calibrate-action chrome:searchBar
 bun run capture -- --calibrate-action chrome:ellipsis
 bun run capture -- --calibrate-action chrome:newIncognitoTab
+bun run capture -- --calibrate-all
 bun run preflight
 bun run check-mirror
 bun run sanity-capture -- --query "a"
@@ -139,6 +140,12 @@ Supported action IDs:
 - `chrome:searchBar`
 - `chrome:ellipsis`
 - `chrome:newIncognitoTab`
+- `chrome:searchIcon`
+- `chrome:homeIcon`
+- `instagram:searchIcon`
+- `instagram:homeIcon`
+- `tiktok:searchIcon`
+- `tiktok:homeIcon`
 
 For a new action:
 
@@ -149,6 +156,7 @@ For a new action:
 bun run capture -- --calibrate-action chrome:searchBar
 bun run capture -- --calibrate-action chrome:ellipsis
 bun run capture -- --calibrate-action chrome:newIncognitoTab
+bun run capture -- --calibrate-all
 ```
 
 3. Move your mouse over the target point and press Enter when ready.
@@ -157,6 +165,24 @@ bun run capture -- --calibrate-action chrome:newIncognitoTab
 - `points.appActionPoints.chrome.searchBar`
 - `points.appActionPoints.chrome.ellipsis`
 - `points.appActionPoints.chrome.newIncognitoTab`
+- `points.appActionPoints.chrome.searchIcon`
+- `points.appActionPoints.chrome.homeIcon`
+- `points.appActionPoints.instagram.searchIcon`
+- `points.appActionPoints.instagram.homeIcon`
+- `points.appActionPoints.tiktok.searchIcon`
+- `points.appActionPoints.tiktok.homeIcon`
+
+`--calibrate-all` performs one pass over every supported point in order:
+
+```bash
+bun run capture -- --calibrate-all
+```
+
+It captures `homeSearchButton` first, then each action definition, tapping each sampled point after Enter to confirm before moving to the next action. It writes:
+
+- `calibration/iphone_content.png`
+- `calibration/base-coordinates.json`
+- `calibration/base-coordinates.snapshot-<ISO>.json` (automatic backup of any previous profile)
 
 During capture, if `chrome:searchBar` is available, the Chrome flow uses that point before falling back to `appSearchSteps`.
 
@@ -172,6 +198,8 @@ Convenience targets:
 ```bash
 just calibrate-action app=chrome action=searchBar
 just calibrate-chrome-search-bar
+just calibrate-action-chrome-search-icon
+just calibrate-all
 just calibrate-action-chrome-ellipsis
 just calibrate-action-chrome-new-incognito-tab
 ```
@@ -187,8 +215,10 @@ just preflight
 just check-mirror
 just check-mirror debug=1
 just calibrate
+just calibrate-all
 just calibrate-action app=chrome action=searchBar
 just calibrate-chrome-search-bar
+just calibrate-action-chrome-search-icon
 just calibrate-action-chrome-ellipsis
 just calibrate-action-chrome-new-incognito-tab
 just sanity-capture query="a"

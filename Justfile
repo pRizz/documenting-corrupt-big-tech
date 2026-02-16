@@ -63,11 +63,17 @@ print-window:
 calibrate:
   @{{SCRIPT}} -- --calibrate
 
+calibrate-all:
+  @{{SCRIPT}} -- --calibrate-all
+
 calibrate-action app action:
   @{{SCRIPT}} -- --calibrate-action "{{app}}:{{action}}"
 
 calibrate-chrome-search-bar:
   @{{SCRIPT}} -- --calibrate-action "chrome:searchBar"
+
+calibrate-action-chrome-search-icon:
+  @{{SCRIPT}} -- --calibrate-action "chrome:searchIcon"
 
 calibrate-action-chrome-ellipsis:
   @{{SCRIPT}} -- --calibrate-action "chrome:ellipsis"

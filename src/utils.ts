@@ -1,5 +1,12 @@
 export type SupportedApp = "chrome" | "instagram" | "tiktok";
-export type AppFlowMode = "capture" | "print-window" | "calibrate" | "calibrate-action" | "coord-to-rel" | "point-check";
+export type AppFlowMode =
+	| "capture"
+	| "print-window"
+	| "calibrate"
+	| "calibrate-action"
+	| "calibrate-all"
+	| "coord-to-rel"
+	| "point-check";
 
 export interface CliConfig {
 	query?: string;
@@ -8,6 +15,7 @@ export interface CliConfig {
 	printWindow?: boolean;
 	calibrate?: boolean;
 	calibrateAction?: string;
+	calibrateAll?: boolean;
 	coordToRel?: [number, number];
 	pointCheck?: [number, number];
 }
@@ -55,6 +63,8 @@ export interface ActionCalibrationDefinition {
 	label: string;
 	forApp: SupportedApp;
 	fallbackTapSteps?: string;
+	requiredForCapture?: boolean;
+	skipInCalibrateAll?: boolean;
 }
 
 export const LOG_PREFIX = "iphone-mirror-autofill";
@@ -108,17 +118,49 @@ export const ACTION_CALIBRATION_DEFINITIONS: ReadonlyArray<ActionCalibrationDefi
 		id: "chrome:ellipsis",
 		label: "Chrome ellipsis/options",
 		forApp: "chrome",
+		requiredForCapture: true,
 	},
 	{
 		id: "chrome:newIncognitoTab",
 		label: "Chrome new incognito tab",
 		forApp: "chrome",
+		requiredForCapture: true,
 	},
 	{
 		id: "chrome:searchBar",
 		label: "Chrome search bar",
 		forApp: "chrome",
 		fallbackTapSteps: CHROME_SEARCH_STEPS,
+	},
+	{
+		id: "chrome:searchIcon",
+		label: "Chrome search icon",
+		forApp: "chrome",
+	},
+	{
+		id: "instagram:searchIcon",
+		label: "Instagram search icon",
+		forApp: "instagram",
+	},
+	{
+		id: "tiktok:searchIcon",
+		label: "TikTok search icon",
+		forApp: "tiktok",
+	},
+	{
+		id: "chrome:homeIcon",
+		label: "Chrome home icon",
+		forApp: "chrome",
+	},
+	{
+		id: "instagram:homeIcon",
+		label: "Instagram home icon",
+		forApp: "instagram",
+	},
+	{
+		id: "tiktok:homeIcon",
+		label: "TikTok home icon",
+		forApp: "tiktok",
 	},
 ];
 
@@ -342,7 +384,8 @@ export function formatUsage(): string {
 	  --print-window         Print iPhone mirroring window bounds and computed content bounds
 	  --calibrate            Interactive calibrate: capture Search button coordinate from mouse and write calibration/base-coordinates.json
 	  --calibrate-action KEY  Calibrate an app action coordinate. Key format: app:action
-	                        Supported: chrome:searchBar, chrome:ellipsis, chrome:newIncognitoTab
+	                        Supported: chrome:searchBar, chrome:ellipsis, chrome:newIncognitoTab, chrome:searchIcon, chrome:homeIcon, instagram:searchIcon, instagram:homeIcon, tiktok:searchIcon, tiktok:homeIcon
+	  --calibrate-all         Interactive calibrate all supported action points in one pass
 	  --coord-to-rel X Y     Convert absolute screen coordinates to relative (0..1)
 	  --point-check RX RY     Validate relative-to-absolute conversion for debug
 	  -h, --help             Print this help text

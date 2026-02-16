@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { clearLine, createInterface, cursorTo, moveCursor } from "node:readline";
 
@@ -314,6 +314,14 @@ function buildCalibrationTelemetry(sample: MouseLocationSample, region: Region):
 	};
 }
 
+function getCurrentTimeSuffix(): string {
+	return new Date().toISOString().replace(/[:.]/g, "-");
+}
+
+function buildSnapshotCalibrationPath(): string {
+	return `./calibration/base-coordinates.snapshot-${getCurrentTimeSuffix()}.json`;
+}
+
 function formatCalibrationPreview(label: string, sample: CalibrationTelemetrySample, region: Region): string {
 	const relText = Number.isFinite(sample.relX) && Number.isFinite(sample.relY)
 		? `(${sample.relX.toFixed(6)}, ${sample.relY.toFixed(6)})`
@@ -351,7 +359,7 @@ function queryMouseLocation(): MouseLocationSample {
 
 async function promptAndCapturePoint(label: string, contentRegion: Region): Promise<void> {
 	console.log(CALIBRATION_PROMPT_HEADER);
-	console.log(label);
+	console.log(`Next: ${label}`);
 	console.log("  - Move your mouse pointer over the target point in the mirrored iPhone.");
 	console.log("  - Keep both this terminal and the iPhone mirroring window visible.");
 	console.log("  - Make sure this terminal is focused before pressing Enter.");
@@ -606,21 +614,31 @@ export class AutofillAutomation {
 		return this.calibrationProfile;
 	}
 
+	private getExistingCalibrationProfile(): BaseCoordinatesProfile | undefined {
+		try {
+			if (!existsSync(BASE_COORDINATES_FILE)) {
+				return undefined;
+			}
+			return this.getCalibrationProfile();
+		} catch {
+			return undefined;
+		}
+	}
+
+	private backupExistingCalibrationProfile(): string | undefined {
+		if (!existsSync(BASE_COORDINATES_FILE)) {
+			return undefined;
+		}
+		const snapshotPath = buildSnapshotCalibrationPath();
+		renameSync(BASE_COORDINATES_FILE, snapshotPath);
+		this.calibrationProfile = undefined;
+		return snapshotPath;
+	}
+
 	private persistCalibrationProfile(profile: BaseCoordinatesProfile): void {
 		mkdirSync(dirname(BASE_COORDINATES_FILE), { recursive: true });
 		writeFileSync(BASE_COORDINATES_FILE, `${JSON.stringify(profile, null, 2)}\n`);
 		this.calibrationProfile = profile;
-	}
-
-	private getExistingAppActionPoints(): ActionPointsByApp | undefined {
-		if (!existsSync(BASE_COORDINATES_FILE)) {
-			return undefined;
-		}
-		try {
-			return this.getCalibrationProfile().points.appActionPoints;
-		} catch {
-			return undefined;
-		}
 	}
 
 	private updateActionPointInProfile(
@@ -1160,7 +1178,7 @@ export class AutofillAutomation {
 				[
 					`Captured point for ${label} is outside the current mirrored content region.`,
 					`screen=(${ax}, ${ay}) local=(${ax - region.x}, ${ay - region.y}) region=(x=${region.x}, y=${region.y}, w=${region.width}, h=${region.height}) rel=(${relX}, ${relY})`,
-					"Open iPhone Mirroring, place the pointer directly on the Search button, then rerun:",
+					`Open iPhone Mirroring, place the pointer on the target point for ${label}, then rerun:`,
 					"bun run capture -- --calibrate",
 				].join(" "),
 			);
@@ -1183,16 +1201,29 @@ export class AutofillAutomation {
 	}
 
 	private async captureHomeSearchFromMouse(contentRegion: Region): Promise<BaseCoordinatePoint> {
-		await promptAndCapturePoint(CALIBRATION_SEARCH_BUTTON_PROMPT, contentRegion);
+		return this.capturePointFromMouse(CALIBRATION_SEARCH_BUTTON_PROMPT, contentRegion);
+	}
+
+	private async capturePointFromMouse(
+		label: string,
+		contentRegion: Region,
+		options: { tapAfterCapture?: boolean } = {},
+	): Promise<BaseCoordinatePoint> {
+		await promptAndCapturePoint(label, contentRegion);
 		const sample = queryMouseLocation();
-		const [relX, relY] = this.absToRelWithinRegion(sample.x, sample.y, contentRegion, "Search button");
-		this.logCalibrationCapture("Search button", sample, contentRegion, relX, relY);
-		return {
+		const [relX, relY] = this.absToRelWithinRegion(sample.x, sample.y, contentRegion, label);
+		this.logCalibrationCapture(label, sample, contentRegion, relX, relY);
+		const capturedPoint: BaseCoordinatePoint = {
 			relX,
 			relY,
 			absX: sample.x,
 			absY: sample.y,
 		};
+		if (options.tapAfterCapture) {
+			await this.clickRel(capturedPoint.relX, capturedPoint.relY);
+			await sleepAfterAction("calibration-point-tap", CAPTURE_FAST_STEP_GAP_SEC);
+		}
+		return capturedPoint;
 	}
 
 	private makeBasePointFromRel(rx: number, ry: number, region: Region): BaseCoordinatePoint {
@@ -1287,7 +1318,16 @@ export class AutofillAutomation {
 		await sleepAfterAction("home-swipe-finish", CAPTURE_FAST_STEP_GAP_SEC);
 	}
 
-	private async openAppFromHome(iconRx: number, iconRy: number): Promise<void> {
+	private async openAppFromHome(app: SupportedApp): Promise<void> {
+		const fallbackIconPoint = this.getActionPoint(app, "homeIcon");
+		const icon = fallbackIconPoint ?? null;
+		const iconMap: Record<SupportedApp, [number, number]> = {
+			chrome: [CHROME_ICON_RX, CHROME_ICON_RY],
+			instagram: [INSTAGRAM_ICON_RX, INSTAGRAM_ICON_RY],
+			tiktok: [TIKTOK_ICON_RX, TIKTOK_ICON_RY],
+		};
+		const fallback = iconMap[app];
+
 		if (!(await this.ensureMirrorFrontmost("open-app-from-home"))) {
 			die("Could not ensure mirror host before opening app.");
 		}
@@ -1295,7 +1335,15 @@ export class AutofillAutomation {
 		if (!(await this.ensureMirrorFrontmost("open-app:before-icon-tap"))) {
 			die("Could not ensure mirror host before app icon tap.");
 		}
-		await this.clickRel(iconRx, iconRy);
+		if (icon) {
+			logAction(`openAppFromHome(${app}): using calibrated homeIcon`);
+			await this.clickRel(icon.relX, icon.relY);
+		} else if (fallback) {
+			logAction(`openAppFromHome(${app}): using fallback hard-coded icon coordinates`);
+			await this.clickRel(fallback[0], fallback[1]);
+		} else {
+			die(`No icon coordinates available for ${app}.`);
+		}
 		await sleepAfterAction("open-app-from-home-legacy", CAPTURE_FAST_STEP_GAP_SEC);
 	}
 
@@ -1331,6 +1379,28 @@ export class AutofillAutomation {
 		return getActionDefinition(app, action);
 	}
 
+	private getRequiredActionPointForCapture(app: SupportedApp, action: string, fallbackLabel: string): BaseCoordinatePoint {
+		const definition = this.getActionDefinitionForTarget(app, action);
+		if (!definition) {
+			die(`${fallbackLabel} not configured in action definitions (${app}:${action}).`);
+		}
+
+		const point = this.getActionPoint(app, action);
+		if (!point) {
+			die(
+				[
+					`Missing required action point: ${definition.id}`,
+					`Calibrate with: bun run capture -- --calibrate-action ${definition.id}`,
+				].join("\n"),
+			);
+		}
+		return point;
+	}
+
+	private getAllCalibrationDefinitionsForAllMode(): ActionCalibrationDefinition[] {
+		return ACTION_CALIBRATION_DEFINITIONS.filter((definition) => definition.skipInCalibrateAll !== true);
+	}
+
 	private getActionPoint(app: SupportedApp, action: string): BaseCoordinatePoint | undefined {
 		const actionPoints = this.getCalibrationProfile().points.appActionPoints;
 		if (!actionPoints) {
@@ -1344,34 +1414,12 @@ export class AutofillAutomation {
 	}
 
 	private async prepareChromeIncognitoActions(): Promise<void> {
-		const missingRequiredActions: string[] = [];
-
-		const ellipsisDefinition = this.getActionDefinitionForTarget("chrome", "ellipsis");
-		const incognitoDefinition = this.getActionDefinitionForTarget("chrome", "newIncognitoTab");
-		if (!ellipsisDefinition) {
-			die("Missing Chrome calibration definition for 'chrome:ellipsis'.");
-		}
-		if (!incognitoDefinition) {
-			die("Missing Chrome calibration definition for 'chrome:newIncognitoTab'.");
-		}
-
-		const ellipsisPoint = this.getActionPoint("chrome", "ellipsis");
-		if (!ellipsisPoint) {
-			missingRequiredActions.push(ellipsisDefinition.id);
-		}
-
-		const incognitoTabPoint = this.getActionPoint("chrome", "newIncognitoTab");
-		if (!incognitoTabPoint) {
-			missingRequiredActions.push(incognitoDefinition.id);
-		}
-
-		if (missingRequiredActions.length > 0) {
-			const lines = [
-				"Missing required Chrome action calibration points for incognito launch:",
-				...missingRequiredActions.map((missingAction) => `- bun run capture -- --calibrate-action ${missingAction}`),
-			];
-			die(lines.join("\n"));
-		}
+		const ellipsisPoint = this.getRequiredActionPointForCapture("chrome", "ellipsis", "Chrome ellipsis action");
+		const incognitoTabPoint = this.getRequiredActionPointForCapture(
+			"chrome",
+			"newIncognitoTab",
+			"Chrome incognito action",
+		);
 
 		logAction("Chrome incognito flow: tapping Chrome ellipsis");
 		await this.clickRel(ellipsisPoint.relX, ellipsisPoint.relY);
@@ -1385,7 +1433,8 @@ export class AutofillAutomation {
 	private async openAppBySearch(app: SupportedApp): Promise<void> {
 		logAction(`openAppBySearch(${app}): begin`);
 		const appName = APP_LAUNCH_QUERY[app];
-		const searchPoint = this.getSearchButtonProfilePoint();
+		const searchIconPoint = this.getActionPoint(app, "searchIcon");
+		const searchPoint = searchIconPoint ?? this.getSearchButtonProfilePoint();
 
 		logAction(`Opening ${app} via Search flow`);
 		logAction(`openAppBySearch(${app}): checking initial frontmost`);
@@ -1419,6 +1468,11 @@ export class AutofillAutomation {
 			}
 			logAction(`openAppBySearch(${app}): search-button frontmost ok`);
 			logAction("Tapping Search icon");
+			if (searchIconPoint) {
+				logAction(`openAppBySearch(${app}): using calibrated searchIcon action point`);
+			} else {
+				logAction(`openAppBySearch(${app}): using fallback home search point`);
+			}
 			await this.clickRel(searchPoint.relX, searchPoint.relY);
 			logAction(`openAppBySearch(${app}): search icon tapped`);
 			await sleepAfterAction("search-icon-tap", CAPTURE_FAST_STEP_GAP_SEC);
@@ -1458,13 +1512,9 @@ export class AutofillAutomation {
 
 		switch (app) {
 			case "chrome":
-				await this.openAppFromHome(CHROME_ICON_RX, CHROME_ICON_RY);
-				break;
 			case "instagram":
-				await this.openAppFromHome(INSTAGRAM_ICON_RX, INSTAGRAM_ICON_RY);
-				break;
 			case "tiktok":
-				await this.openAppFromHome(TIKTOK_ICON_RX, TIKTOK_ICON_RY);
+				await this.openAppFromHome(app);
 				break;
 			default:
 				die(`Unknown app: ${app}`);
@@ -1584,7 +1634,8 @@ export class AutofillAutomation {
 		const mirrorWindowBounds = this.getMirrorWindowBounds();
 		const mirrorWindow = parseBoundsTuple(mirrorWindowBounds);
 		const contentRegion = this.getContentRegion(mirrorWindowBounds);
-		const existingAppActionPoints = this.getExistingAppActionPoints();
+		const existingProfile = this.getExistingCalibrationProfile();
+		const existingAppActionPoints = existingProfile?.points.appActionPoints;
 		console.log(
 			`Using content region: x=${contentRegion.x} y=${contentRegion.y} w=${contentRegion.width} h=${contentRegion.height}`,
 		);
@@ -1599,19 +1650,87 @@ export class AutofillAutomation {
 				homeSearchButton,
 				launchResultTap: this.makeBasePointFromRel(APP_LAUNCH_RESULT_RX, APP_LAUNCH_RESULT_RY, contentRegion),
 				appSearchSteps: {
-					chrome: CHROME_SEARCH_STEPS,
-					instagram: INSTAGRAM_SEARCH_STEPS,
-					tiktok: TIKTOK_SEARCH_STEPS,
+					chrome: existingProfile?.points.appSearchSteps?.chrome ?? CHROME_SEARCH_STEPS,
+					instagram: existingProfile?.points.appSearchSteps?.instagram ?? INSTAGRAM_SEARCH_STEPS,
+					tiktok: existingProfile?.points.appSearchSteps?.tiktok ?? TIKTOK_SEARCH_STEPS,
 				},
 				appActionPoints: existingAppActionPoints,
 			},
 		};
 
+		const backupPath = this.backupExistingCalibrationProfile();
 		mkdirSync("./calibration", { recursive: true });
 		this.screenshotContent("./calibration/iphone_content.png");
 		this.persistCalibrationProfile(baseCoordinatesProfile);
 		console.log("Wrote ./calibration/iphone_content.png");
 		console.log("Wrote ./calibration/base-coordinates.json");
+		if (backupPath) {
+			console.log(`Backed up previous calibration to: ${backupPath}`);
+		}
+	}
+
+	public async calibrateAll(): Promise<void> {
+		this.ensurePreflightChecks();
+		this.focusMirroring();
+		const mirrorWindowBounds = this.getMirrorWindowBounds();
+		const mirrorWindow = parseBoundsTuple(mirrorWindowBounds);
+		const contentRegion = this.getContentRegion(mirrorWindowBounds);
+		const existingProfile = this.getExistingCalibrationProfile();
+		const orderedDefinitions = this.getAllCalibrationDefinitionsForAllMode();
+		const mergedAppActionPoints: ActionPointsByApp = {
+			...(existingProfile?.points.appActionPoints ?? {}),
+		};
+
+		console.log("Calibrating all supported action points.");
+		console.log(
+			`Using content region: x=${contentRegion.x} y=${contentRegion.y} w=${contentRegion.width} h=${contentRegion.height}`,
+		);
+		console.log(`Total actions to capture: ${orderedDefinitions.length}`);
+
+		const homeSearchButton = await this.capturePointFromMouse(CALIBRATION_SEARCH_BUTTON_PROMPT, contentRegion, {
+			tapAfterCapture: true,
+		});
+
+		for (const definition of orderedDefinitions) {
+			const [app, action] = definition.id.split(":");
+			if (!app || !action) {
+				continue;
+			}
+			const capturedPoint = await this.capturePointFromMouse(`${definition.label} (${definition.id})`, contentRegion, {
+				tapAfterCapture: true,
+			});
+			const currentForApp = mergedAppActionPoints[app as SupportedApp] ?? {};
+			currentForApp[action] = capturedPoint;
+			mergedAppActionPoints[app as SupportedApp] = currentForApp;
+		}
+
+		const baseCoordinatesProfile: BaseCoordinatesProfile = {
+			version: 1,
+			generatedAt: new Date().toISOString(),
+			mirrorWindow,
+			contentRegion,
+			points: {
+				homeSearchButton,
+				launchResultTap: this.makeBasePointFromRel(APP_LAUNCH_RESULT_RX, APP_LAUNCH_RESULT_RY, contentRegion),
+				appSearchSteps: {
+					chrome: existingProfile?.points.appSearchSteps?.chrome ?? CHROME_SEARCH_STEPS,
+					instagram: existingProfile?.points.appSearchSteps?.instagram ?? INSTAGRAM_SEARCH_STEPS,
+					tiktok: existingProfile?.points.appSearchSteps?.tiktok ?? TIKTOK_SEARCH_STEPS,
+				},
+				appActionPoints: mergedAppActionPoints,
+			},
+		};
+
+		const backupPath = this.backupExistingCalibrationProfile();
+		mkdirSync("./calibration", { recursive: true });
+		this.screenshotContent("./calibration/iphone_content.png");
+		this.persistCalibrationProfile(baseCoordinatesProfile);
+		console.log("Wrote ./calibration/iphone_content.png");
+		console.log("Wrote ./calibration/base-coordinates.json");
+		if (backupPath) {
+			console.log(`Backed up previous calibration to: ${backupPath}`);
+		}
+		console.log(`Configured ${orderedDefinitions.length + 1} calibration points in ${BASE_COORDINATES_FILE}.`);
 	}
 
 	public async calibrateAction(app: SupportedApp, action: string): Promise<void> {
@@ -1628,7 +1747,8 @@ export class AutofillAutomation {
 		console.log(`Calibrating action point '${definition.label}' (${definition.id}).`);
 		console.log("Move your mouse over the target point and press Enter to capture it.");
 
-		const capturedPoint = await this.captureHomeSearchFromMouse(contentRegion);
+		const capturedPoint = await this.capturePointFromMouse(`${definition.label} (${definition.id})`, contentRegion);
+		const backupPath = this.backupExistingCalibrationProfile();
 		const updatedProfile = this.updateActionPointInProfile(profile, app, action, capturedPoint);
 		this.persistCalibrationProfile(updatedProfile);
 
@@ -1636,6 +1756,9 @@ export class AutofillAutomation {
 		console.log(`  rel=${capturedPoint.relX.toFixed(6)},${capturedPoint.relY.toFixed(6)}`);
 		if (capturedPoint.absX !== undefined && capturedPoint.absY !== undefined) {
 			console.log(`  abs=${capturedPoint.absX},${capturedPoint.absY}`);
+		}
+		if (backupPath) {
+			console.log(`Backed up previous calibration to: ${backupPath}`);
 		}
 	}
 

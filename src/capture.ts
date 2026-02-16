@@ -126,6 +126,15 @@ export function parseCaptureArgs(argv: string[]): ParsedCapturePlan {
 				index += 1;
 				break;
 			}
+			case "--calibrate-all": {
+				if (explicitModeSet && mode !== "calibrate-all") {
+					die("Only one mode flag may be provided.");
+				}
+				explicitModeSet = true;
+				mode = "calibrate-all";
+				config.calibrateAll = true;
+				break;
+			}
 			case "--coord-to-rel": {
 				if (index + 2 >= argv.length) {
 					die("--coord-to-rel requires X and Y");
@@ -216,6 +225,9 @@ export async function runCaptureMode(plan: ParsedCapturePlan): Promise<void> {
 			await automation.calibrateAction(app, action);
 			return;
 		}
+		case "calibrate-all":
+			await automation.calibrateAll();
+			return;
 		case "coord-to-rel": {
 			if (!plan.config.coordToRel) {
 				die("Missing --coord-to-rel arguments.");
