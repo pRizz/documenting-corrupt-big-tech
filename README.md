@@ -52,6 +52,17 @@ The Bun runtime now opens apps by tapping the iPhone home **Search** button firs
 4. Tap the launch result entry
 5. Continue with in-app search steps
 
+`--calibrate` now captures the Search point interactively:
+
+1. Open the mirrored iPhone and start `bun run capture -- --calibrate`.
+2. Move your mouse so it is over the iPhone **Search** icon.
+3. Press Enter in the terminal when positioned.
+4. The script records both absolute and normalized coordinates into `calibration/base-coordinates.json`:
+   - `points.homeSearchButton.absX`, `points.homeSearchButton.absY`
+   - `points.homeSearchButton.relX`, `points.homeSearchButton.relY`
+
+You can re-run calibration later if app layout changes.
+
 This behavior is controlled by:
 
 - `calibration/base-coordinates.json`
@@ -101,6 +112,8 @@ just print-window
 5. `bun run capture -- --calibrate`
 6. `bun run sanity-capture -- --query "a"`
 7. `bun run capture -- --query "pizza" --apps chrome,instagram,tiktok` once input and taps are stable
+8. During `--calibrate`, move your mouse to the mirrored Search button and press Enter when ready.
+9. The calibration file now stores both absolute and relative coordinates for the Search point, plus absolute+relative launch-result metadata for traceability.
 
 ### Notes
 

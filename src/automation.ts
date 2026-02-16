@@ -2,8 +2,6 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import {
-	APP_HOME_SEARCH_RX,
-	APP_HOME_SEARCH_RY,
 	APP_LAUNCH_QUERY,
 	APP_LAUNCH_RESULT_RX,
 	APP_LAUNCH_RESULT_RY,
@@ -32,6 +30,8 @@ import {
 	TIKTOK_SEARCH_STEPS,
 	type BaseCoordinatePoint,
 	type BaseCoordinatesProfile,
+	CALIBRATION_PROMPT_HEADER,
+	CALIBRATION_SEARCH_BUTTON_PROMPT,
 	RELATIVE_TOKEN_RE,
 	sleep,
 	trim,
@@ -135,6 +135,49 @@ function parseTapSteps(raw: string, label = "tap sequence"): [number, number][] 
 
 function escapeTapText(value: string): string {
 	return value.replace(/\\/g, "\\\\").replace(/,/g, "\\,").replace(/:/g, "\\:");
+}
+
+function parseMouseLocation(raw: string): [number, number] {
+	const candidates = [
+		raw.match(/^\s*\{?\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*\}?\s*$/),
+		raw.match(/x:\s*([+-]?\d+(?:\.\d+)?)\s*,\s*y:\s*([+-]?\d+(?:\.\d+)?)\s*/i),
+	];
+
+	for (const match of candidates) {
+		if (match === null) continue;
+		const x = Number(match[1]);
+		const y = Number(match[2]);
+		if (Number.isFinite(x) && Number.isFinite(y)) {
+			return [x, y];
+		}
+	}
+
+	die(`Unable to parse mouse coordinates from '${raw}'. Expected formats like "{x, y}" or "x, y".`);
+}
+
+function queryMouseLocation(): [number, number] {
+	try {
+		const osaOutput = runOsa(`tell application "System Events"\nset mouseXY to (position of the mouse)\nreturn mouseXY`);
+	return parseMouseLocation(osaOutput);
+	} catch {
+		const cliclickResult = asCommandResult("cliclick", ["p"]);
+		if (cliclickResult.exitCode !== 0) {
+			die("Unable to read mouse location. Ensure Accessibility permissions are enabled for Terminal/System Events and try again.");
+		}
+		return parseMouseLocation(trim(cliclickResult.output));
+	}
+}
+
+function promptAndCapturePoint(label: string): void {
+	console.log(CALIBRATION_PROMPT_HEADER);
+	console.log(label);
+	console.log("  - Move your mouse pointer over the target point in the mirrored iPhone.");
+	console.log("  - Press Enter to sample that point.");
+	console.log("  - Press Ctrl+C to cancel.");
+	const chunk = readFileSync(0, "utf8");
+	if (chunk.length === 0) {
+		die("No input received while waiting for calibration confirmation.");
+	}
 }
 
 export class AutofillAutomation {
@@ -783,6 +826,40 @@ export class AutofillAutomation {
 		return [absX, absY];
 	}
 
+	private absToRelWithinRegion(ax: number, ay: number, region: Region, label = "point"): [number, number] {
+		if (region.width === 0 || region.height === 0) {
+			die(`Invalid content region while converting absolute point (${ax}, ${ay}) for ${label}`);
+		}
+		const relX = (ax - region.x) / region.width;
+		const relY = (ay - region.y) / region.height;
+		if (!Number.isFinite(relX) || !Number.isFinite(relY)) {
+			die(`Could not convert absolute point (${ax}, ${ay}) to relative for ${label}`);
+		}
+		if (relX < 0 || relX > 1 || relY < 0 || relY > 1) {
+			die(
+				[
+					`Captured point for ${label} is outside the current mirrored content region.`,
+					"Open iPhone Mirroring, place the pointer directly on the Search button, then rerun:",
+					"bun run capture -- --calibrate",
+				].join(" "),
+			);
+		}
+		return [relX, relY];
+	}
+
+	private captureHomeSearchFromMouse(contentRegion: Region): BaseCoordinatePoint {
+		promptAndCapturePoint(CALIBRATION_SEARCH_BUTTON_PROMPT);
+		const [absX, absY] = queryMouseLocation();
+		const [relX, relY] = this.absToRelWithinRegion(absX, absY, contentRegion, "Search button");
+		console.log(`Captured Search button @ abs(${absX}, ${absY}) => rel(${relX.toFixed(6)}, ${relY.toFixed(6)})`);
+		return {
+			relX,
+			relY,
+			absX,
+			absY,
+		};
+	}
+
 	private makeBasePointFromRel(rx: number, ry: number, region: Region): BaseCoordinatePoint {
 		const [absX, absY] = this.relToAbsWithRegion(rx, ry, region);
 		return { relX: rx, relY: ry, absX, absY };
@@ -1046,6 +1123,7 @@ export class AutofillAutomation {
 		const mirrorWindowBounds = this.getMirrorWindowBounds();
 		const mirrorWindow = parseBoundsTuple(mirrorWindowBounds);
 		const contentRegion = this.getContentRegion(mirrorWindowBounds);
+		const homeSearchButton = this.captureHomeSearchFromMouse(contentRegion);
 
 		const baseCoordinatesProfile: BaseCoordinatesProfile = {
 			version: 1,
@@ -1053,7 +1131,7 @@ export class AutofillAutomation {
 			mirrorWindow,
 			contentRegion,
 			points: {
-				homeSearchButton: this.makeBasePointFromRel(APP_HOME_SEARCH_RX, APP_HOME_SEARCH_RY, contentRegion),
+				homeSearchButton,
 				launchResultTap: this.makeBasePointFromRel(APP_LAUNCH_RESULT_RX, APP_LAUNCH_RESULT_RY, contentRegion),
 				appSearchSteps: {
 					chrome: CHROME_SEARCH_STEPS,

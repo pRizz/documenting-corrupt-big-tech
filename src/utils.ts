@@ -72,6 +72,9 @@ export const APP_HOME_SEARCH_RY = 0.91;
 export const APP_LAUNCH_RESULT_RX = 0.5;
 export const APP_LAUNCH_RESULT_RY = 0.63;
 
+export const CALIBRATION_PROMPT_HEADER = "🔧 Calibration: interactive coordinate capture";
+export const CALIBRATION_SEARCH_BUTTON_PROMPT = "Target: iPhone Home Screen Search button";
+
 export const CHROME_ICON_RX = 0.18;
 export const CHROME_ICON_RY = 0.78;
 export const INSTAGRAM_ICON_RX = 0.40;
@@ -180,7 +183,7 @@ Modes:
 
 Utility:
   --print-window         Print iPhone mirroring window bounds and computed content bounds
-  --calibrate            Capture a crop preview and write calibration/base-coordinates.json
+  --calibrate            Interactive calibrate: capture Search button coordinate from mouse and write calibration/base-coordinates.json
   --coord-to-rel X Y     Convert absolute screen coordinates to relative (0..1)
   --point-check RX RY     Validate relative-to-absolute conversion for debug
   -h, --help             Print this help text
