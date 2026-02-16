@@ -1,4 +1,5 @@
-import { AppFlowMode, CliConfig, SupportedApp, die, formatUsage, parseNumberToken } from "./utils";
+import type { AppFlowMode, CliConfig, SupportedApp } from "./utils";
+import { die, formatUsage, parseNumberToken } from "./utils";
 import { AutofillAutomation, SUPPORTED_APPS } from "./automation";
 
 export interface ParsedCapturePlan {
@@ -57,7 +58,11 @@ export function parseCaptureArgs(argv: string[]): ParsedCapturePlan {
 				if (index + 1 >= argv.length) {
 					die("--query requires a value");
 				}
-				config.query = argv[index + 1];
+				const rawQuery = argv[index + 1];
+				if (rawQuery === undefined) {
+					die("--query requires a value");
+				}
+				config.query = rawQuery;
 				index += 1;
 				break;
 			}
@@ -65,7 +70,11 @@ export function parseCaptureArgs(argv: string[]): ParsedCapturePlan {
 				if (index + 1 >= argv.length) {
 					die("--apps requires a value");
 				}
-				config.apps = parseApps(argv[index + 1]);
+				const rawApps = argv[index + 1];
+				if (rawApps === undefined) {
+					die("--apps requires a value");
+				}
+				config.apps = parseApps(rawApps);
 				index += 1;
 				break;
 			}
@@ -73,7 +82,11 @@ export function parseCaptureArgs(argv: string[]): ParsedCapturePlan {
 				if (index + 1 >= argv.length) {
 					die("--out requires a value");
 				}
-				config.out = argv[index + 1];
+				const rawOut = argv[index + 1];
+				if (rawOut === undefined) {
+					die("--out requires a value");
+				}
+				config.out = rawOut;
 				index += 1;
 				break;
 			}
@@ -104,9 +117,14 @@ export function parseCaptureArgs(argv: string[]): ParsedCapturePlan {
 				}
 				explicitModeSet = true;
 				mode = "coord-to-rel";
+				const x = argv[index + 1];
+				const y = argv[index + 2];
+				if (x === undefined || y === undefined) {
+					die("--coord-to-rel requires X and Y");
+				}
 				config.coordToRel = [
-					parseNumberToken("--coord-to-rel X", argv[index + 1]),
-					parseNumberToken("--coord-to-rel Y", argv[index + 2]),
+					parseNumberToken("--coord-to-rel X", x),
+					parseNumberToken("--coord-to-rel Y", y),
 				];
 				index += 2;
 				break;
@@ -120,9 +138,14 @@ export function parseCaptureArgs(argv: string[]): ParsedCapturePlan {
 				}
 				explicitModeSet = true;
 				mode = "point-check";
+				const x = argv[index + 1];
+				const y = argv[index + 2];
+				if (x === undefined || y === undefined) {
+					die("--point-check requires RX and RY");
+				}
 				config.pointCheck = [
-					parseNumberToken("--point-check RX", argv[index + 1]),
-					parseNumberToken("--point-check RY", argv[index + 2]),
+					parseNumberToken("--point-check RX", x),
+					parseNumberToken("--point-check RY", y),
 				];
 				index += 2;
 				break;
@@ -171,14 +194,22 @@ export async function runCaptureMode(plan: ParsedCapturePlan): Promise<void> {
 			if (!plan.config.coordToRel) {
 				die("Missing --coord-to-rel arguments.");
 			}
-			await automation.coordToRelMode(plan.config.coordToRel[0], plan.config.coordToRel[1]);
+			const [x, y] = plan.config.coordToRel;
+			if (x === undefined || y === undefined) {
+				die("Missing --coord-to-rel arguments.");
+			}
+			await automation.coordToRelMode(x, y);
 			return;
 		}
 		case "point-check": {
 			if (!plan.config.pointCheck) {
 				die("Missing --point-check arguments.");
 			}
-			await automation.pointCheckMode(plan.config.pointCheck[0], plan.config.pointCheck[1]);
+			const [x, y] = plan.config.pointCheck;
+			if (x === undefined || y === undefined) {
+				die("Missing --point-check arguments.");
+			}
+			await automation.pointCheckMode(x, y);
 			return;
 		}
 		case "capture":

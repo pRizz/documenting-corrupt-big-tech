@@ -4,6 +4,8 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "typecheck": "bunx tsc --noEmit",
+    "typecheck:watch": "bunx tsc --noEmit --watch",
     "capture": "bun run src/cli.ts",
     "capture:all": "bun run capture -- --apps chrome,instagram,tiktok",
     "capture:chrome": "bun run capture -- --apps chrome",
@@ -18,7 +20,8 @@
     "check-mirror": "bun run print-window"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "typescript": "^5"

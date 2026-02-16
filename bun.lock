@@ -6,6 +6,7 @@
       "name": "documenting-corrupt-big-tech",
       "devDependencies": {
         "@types/bun": "latest",
+        "typescript": "^5.9.3",
       },
       "peerDependencies": {
         "typescript": "^5",

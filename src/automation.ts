@@ -24,19 +24,17 @@ import {
 	TIKTOK_ICON_RX,
 	TIKTOK_ICON_RY,
 	TIKTOK_SEARCH_STEPS,
-	Region,
 	RELATIVE_TOKEN_RE,
-	SupportedApp,
 	sleep,
 	trim,
 	sanitizeQueryForFilename,
 	timestampSnapshot,
-	WindowBounds,
 	die,
 	failWithConnectionHint,
 	logPayload,
 	logStep,
 } from "./utils";
+import type { Region, SupportedApp, WindowBounds } from "./utils";
 
 export const SUPPORTED_APPS: ReadonlyArray<SupportedApp> = ["chrome", "instagram", "tiktok"];
 
@@ -77,7 +75,13 @@ function parseBoundsTuple(raw: string): WindowBounds {
 	if (values.length !== 4 || values.some((value) => Number.isNaN(value))) {
 		die(`Could not parse bounds payload '${raw}'.`);
 	}
-	const [x1, y1, x2, y2] = values;
+	const x1 = values[0];
+	const y1 = values[1];
+	const x2 = values[2];
+	const y2 = values[3];
+	if (x1 === undefined || y1 === undefined || x2 === undefined || y2 === undefined) {
+		die(`Could not parse bounds payload '${raw}'.`);
+	}
 	return { x1, y1, x2, y2 };
 }
 
@@ -455,8 +459,8 @@ export class AutofillAutomation {
 		}
 		if (probeOutput.startsWith("FRONT=")) {
 			const fields = probeOutput.split("|");
-			const procName = fields[0]?.replace("FRONT=", "") ?? "";
-			const frontMode = fields[1]?.replace("MODE=", "") ?? "";
+			const procName = fields[0] ? fields[0].replace("FRONT=", "") : "";
+			const frontMode = fields[1] ? fields[1].replace("MODE=", "") : "";
 			const bounds = fields.slice(2).join("|");
 			if (PRINT_WINDOW_DEBUG) {
 				console.error(`Frontmost process '${procName}' used mode '${frontMode}' => bounds ${bounds}`);
@@ -623,7 +627,14 @@ export class AutofillAutomation {
 		}
 
 		for (const step of steps.split(";").map(trim).filter((entry) => entry.length > 0)) {
-			const [rawRx, rawRy] = step.split(",");
+			const tokens = step.split(",");
+			if (tokens.length !== 2) {
+				die(`Invalid tap sequence step '${step}'. Expected 'x,y'.`);
+			}
+			const [rawRx, rawRy] = tokens;
+			if (rawRx === undefined || rawRy === undefined) {
+				die(`Invalid tap sequence step '${step}'. Expected 'x,y'.`);
+			}
 			const x = validateRelativeToken("x", rawRx);
 			const y = validateRelativeToken("y", rawRy);
 			await this.clickRel(x, y);
@@ -669,7 +680,9 @@ export class AutofillAutomation {
 			die("Could not guarantee iPhone mirroring host is frontmost before clearing search.");
 		}
 
-		if (CLEAR_MODE === "select_all") {
+		const clearMode = String(CLEAR_MODE);
+
+		if (clearMode === "select_all") {
 			if (await this.sendHostKeystroke("a", "command", "select_all")) {
 				this.runCliclick("kp:delete");
 			} else {
@@ -680,10 +693,8 @@ export class AutofillAutomation {
 				}
 			}
 			return;
-		}
-
-		if (CLEAR_MODE.startsWith("backspace:")) {
-			const rawCount = CLEAR_MODE.slice("backspace:".length);
+		} else if (clearMode.startsWith("backspace:")) {
+			const rawCount = clearMode.slice("backspace:".length);
 			const count = Number(rawCount);
 			if (!Number.isInteger(count) || count < 0) {
 				die(`Invalid CLEAR_MODE backspace count: ${rawCount}`);
@@ -704,8 +715,8 @@ export class AutofillAutomation {
 			if (!(await this.ensureMirrorFrontmost(`type-char-${app}`))) {
 				die(`Could not ensure mirror host during character typing at index ${i}.`);
 			}
-			const ch = query[i];
-			this.runCliclick(`t:${escapeTapText(ch)}`);
+		const ch = query.charAt(i);
+		this.runCliclick(`t:${escapeTapText(ch)}`);
 			await sleep(CHAR_DELAY_SEC);
 			const prefix = String(i + 1).padStart(2, "0");
 			this.screenshotContent(`${outdir}/${app}_${prefix}_${querySlug}.png`);
