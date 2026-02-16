@@ -124,6 +124,35 @@ just print-window
 8. During `--calibrate`, move your mouse to the mirrored Search button and press Enter when ready.
 9. The calibration file now stores both absolute and relative coordinates for the Search point, plus absolute+relative launch-result metadata for traceability.
 
+### Calibration and one-app validation workflow
+
+Use this order when bringing up a new setup or after UI changes:
+
+1. Prepare environment and mirror:
+   - `bun run preflight`
+   - `bun run print-window`
+2. Capture fresh coordinates:
+   - `bun run capture -- --calibrate`
+   - Keep both terminal and iPhone mirroring visible.
+   - Place the mouse over the mirrored iPhone Search icon.
+   - Ensure terminal is focused and press Enter to record the point.
+   - Verify both files were written:
+     - `calibration/iphone_content.png`
+     - `calibration/base-coordinates.json`
+3. Validate one app at a time (use a short one-char query):
+   - `bun run capture -- --query "a" --apps chrome`
+   - `bun run capture -- --query "a" --apps instagram`
+   - `bun run capture -- --query "a" --apps tiktok`
+4. Confirm each run reports:
+   - `Done. Output: ...`
+   - output directories contain the expected per-app captures.
+5. Optional spot checks:
+   - `bun run capture -- --coord-to-rel 100 100`
+   - `bun run capture -- --point-check 0.5 0.1`
+6. If any app misfires:
+   - rerun `bun run capture -- --calibrate`
+   - re-test only the failing app first before doing multi-app captures.
+
 ### Notes
 
 - App icon positions and search-entry taps are still present as legacy fallback and are reflected in `src/utils.ts` defaults.
