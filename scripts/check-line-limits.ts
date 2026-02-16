@@ -4,10 +4,6 @@ import process from "node:process";
 
 const MAX_LINES = 400;
 
-const EXEMPT_FILES = new Set<string>([
-	"src/automation/flow-legacy.ts",
-]);
-
 function walk(dir: string, out: string[] = []): string[] {
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
 		if (entry.name.startsWith(".")) continue;
@@ -28,7 +24,6 @@ const offenders: string[] = [];
 
 for (const file of files) {
 	const relPath = relative(process.cwd(), file);
-	if (EXEMPT_FILES.has(relPath)) continue;
 	const contents = readFileSync(file, "utf8");
 	const lineCount = contents.split(/\r?\n/).length;
 	if (lineCount > MAX_LINES) {

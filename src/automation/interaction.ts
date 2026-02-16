@@ -4,6 +4,8 @@ import { asCommandResult } from "./command-bridge";
 import { logPayload } from "../utils";
 import { escapeTapText, parseTapSteps, relToAbs, validateRelativePair } from "./geometry";
 import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { sleepAfterAction } from "./timing";
 
 interface InteractionHost {
 	ensureMirrorFrontmost: (label: string) => Promise<boolean>;
@@ -64,10 +66,12 @@ export async function tapSequence(host: InteractionHost, steps: string): Promise
 	const parsedSteps = parseTapSteps(steps, "tap sequence");
 	for (const [x, y] of parsedSteps) {
 		await clickRel(host, x, y);
+		await sleepAfterAction("tap-sequence-step");
 	}
 }
 
-export async function screenshotContent(host: InteractionHost, out: string): Promise<void> {
+export function screenshotContent(host: InteractionHost, out: string): void {
+	mkdirSync(dirname(out), { recursive: true });
 	const region = host.getContentRegion();
 	const args = ["-x", "-R", `${region.x},${region.y},${region.width},${region.height}`, out];
 	const result = asCommandResult("screencapture", args);
@@ -129,7 +133,7 @@ export async function typeAndCapturePerChar(
 ): Promise<void> {
 	const appDir = outdir;
 	mkdirSync(appDir, { recursive: true });
-	await hostScreenshot(host, appDir, _app, querySlug, "00_empty");
+	hostScreenshot(host, appDir, _app, querySlug, "00_empty");
 	for (let index = 0; index < query.length; index += 1) {
 		if (!(await host.ensureMirrorFrontmost(`type-char-${_app}`))) {
 			die(`Could not ensure mirror host during character typing at index ${index}.`);
@@ -138,10 +142,10 @@ export async function typeAndCapturePerChar(
 		runCliclick.call(host, `t:${escapeTapText(ch)}`);
 		await new Promise((resolve) => setTimeout(resolve, CHAR_DELAY_SEC * 1000));
 		const prefix = String(index + 1).padStart(2, "0");
-		await hostScreenshot(host, appDir, _app, querySlug, prefix);
+		hostScreenshot(host, appDir, _app, querySlug, prefix);
 	}
 }
 
-async function hostScreenshot(host: InteractionHost, appDir: string, app: SupportedApp, querySlug: string, prefix: string): Promise<void> {
+function hostScreenshot(host: InteractionHost, appDir: string, app: SupportedApp, querySlug: string, prefix: string): void {
 	host.screenshotContent(`${appDir}/${app}_${prefix}_${querySlug}.png`);
 }

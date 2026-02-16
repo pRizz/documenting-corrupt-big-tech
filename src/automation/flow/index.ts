@@ -1,6 +1,42 @@
-export { AutofillAutomation, SUPPORTED_APPS } from "../flow-legacy";
-export { runCaptureFlow } from "./capture";
-export { runAppFlow } from "./app-launch";
-export { calibrateAction, calibrateAll, listAvailableCalibrations, isCalibratableAction } from "./calibration";
-export { runPrintWindow, runCoordToRel, runPointCheck } from "./debug";
-export { createFlowContext, getCurrentContext, buildRuntimeInput, resolveFlowDefinition } from "./context";
+import { SUPPORTED_APPS, type SupportedApp } from "../../utils";
+import { createAutomationSession } from "./session";
+import { runCaptureFlow } from "./capture";
+import { calibrateAction, calibrateAll, calibrateMode, isCalibratableAction, listAvailableCalibrations } from "./calibration";
+import { coordToRelMode, pointCheckMode, printWindowMode, runPreflight } from "./debug";
+
+export type AutomationCommand =
+	| { mode: "capture"; query: string; apps: SupportedApp[]; outDir?: string }
+	| { mode: "print-window" }
+	| { mode: "calibrate" }
+	| { mode: "calibrate-action"; app: SupportedApp; action: string }
+	| { mode: "calibrate-all" }
+	| { mode: "coord-to-rel"; x: number; y: number }
+	| { mode: "point-check"; x: number; y: number }
+	| { mode: "preflight" };
+
+export async function runAutomationCommand(command: AutomationCommand): Promise<string | void> {
+	const session = createAutomationSession();
+
+	switch (command.mode) {
+		case "capture":
+			return runCaptureFlow(session, command.query, command.apps, command.outDir);
+		case "print-window":
+			return printWindowMode(session);
+		case "calibrate":
+			return calibrateMode(session);
+		case "calibrate-action":
+			return calibrateAction(session, command.app, command.action);
+		case "calibrate-all":
+			return calibrateAll(session);
+		case "coord-to-rel":
+			return coordToRelMode(session, command.x, command.y);
+		case "point-check":
+			return pointCheckMode(session, command.x, command.y);
+		case "preflight":
+			return runPreflight(session);
+		default:
+			command satisfies never;
+	}
+}
+
+export { SUPPORTED_APPS, listAvailableCalibrations, isCalibratableAction };

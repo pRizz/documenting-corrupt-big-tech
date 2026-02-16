@@ -1,6 +1,6 @@
 import { asCommandResult, runOsa } from "./command-bridge";
 import { MIRROR_APP_FALLBACK, MIRROR_APP_NAME, PRINT_WINDOW_DEBUG, failWithConnectionHint, logPayload, logStep } from "../utils";
-import { die, sleep } from "../utils";
+import { die } from "../utils";
 import { logAction, sleepAfterAction } from "./timing";
 import { trim } from "../utils";
 
@@ -147,7 +147,6 @@ export async function sendHostKeystroke(
 	if (!(await this.ensureMirrorFrontmost(`${context}:post`))) {
 		logAction(`sendHostKeystroke(${context}): post-check failed, re-focusing host`);
 		this.focusMirroring();
-		await sleep(0.2);
 		await sleepAfterAction("post-keystroke-focus-restore");
 		if (!(await this.ensureMirrorFrontmost(`${context}:post-retry`))) {
 			die(`Could not return mirroring host to frontmost after keystroke.`);

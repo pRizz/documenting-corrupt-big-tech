@@ -1,6 +1,6 @@
 import type { AppFlowMode, CliConfig, SupportedApp } from "./utils";
 import { die, formatUsage, parseActionTarget, parseNumberToken } from "./utils";
-import { AutofillAutomation, SUPPORTED_APPS } from "./automation";
+import { runAutomationCommand, SUPPORTED_APPS, type AutomationCommand } from "./automation";
 
 export interface ParsedCapturePlan {
 	mode: AppFlowMode;
@@ -208,26 +208,25 @@ export async function runCaptureMode(plan: ParsedCapturePlan): Promise<void> {
 		return;
 	}
 
-	const automation = new AutofillAutomation();
+	const command = buildAutomationCommand(plan);
+	await runAutomationCommand(command);
+}
 
+function buildAutomationCommand(plan: ParsedCapturePlan): AutomationCommand {
 	switch (plan.mode) {
 		case "print-window":
-			await automation.printWindowMode();
-			return;
+			return { mode: "print-window" };
 		case "calibrate":
-			await automation.calibrateMode();
-			return;
+			return { mode: "calibrate" };
 		case "calibrate-action": {
 			if (!plan.config.calibrateAction) {
 				die("Missing --calibrate-action arguments.");
 			}
 			const { app, action } = parseActionTarget(plan.config.calibrateAction);
-			await automation.calibrateAction(app, action);
-			return;
+			return { mode: "calibrate-action", app, action };
 		}
 		case "calibrate-all":
-			await automation.calibrateAll();
-			return;
+			return { mode: "calibrate-all" };
 		case "coord-to-rel": {
 			if (!plan.config.coordToRel) {
 				die("Missing --coord-to-rel arguments.");
@@ -236,8 +235,7 @@ export async function runCaptureMode(plan: ParsedCapturePlan): Promise<void> {
 			if (x === undefined || y === undefined) {
 				die("Missing --coord-to-rel arguments.");
 			}
-			await automation.coordToRelMode(x, y);
-			return;
+			return { mode: "coord-to-rel", x, y };
 		}
 		case "point-check": {
 			if (!plan.config.pointCheck) {
@@ -247,15 +245,18 @@ export async function runCaptureMode(plan: ParsedCapturePlan): Promise<void> {
 			if (x === undefined || y === undefined) {
 				die("Missing --point-check arguments.");
 			}
-			await automation.pointCheckMode(x, y);
-			return;
+			return { mode: "point-check", x, y };
 		}
 		case "capture":
 			if (!plan.config.query || !plan.config.apps) {
 				die("Missing --query and/or --apps.");
 			}
-			await automation.captureMode(plan.config.query, plan.config.apps, plan.config.out);
-			return;
+			return {
+				mode: "capture",
+				query: plan.config.query,
+				apps: plan.config.apps,
+				outDir: plan.config.out,
+			};
 		default:
 			die(`Unsupported mode '${plan.mode}'.`);
 	}

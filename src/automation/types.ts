@@ -1,7 +1,8 @@
-import type { SupportedApp } from "../utils";
+import type { ActionContext, BaseCoordinatesProfile, SupportedApp } from "../utils";
 
 export interface FlowRuntimeContext {
-	calibrationProfile?: import("../utils").BaseCoordinatesProfile;
+	calibrationProfile?: BaseCoordinatesProfile;
+	calibrationContext?: RuntimeAppContext;
 	currentApp?: SupportedApp;
 	currentLabel?: string;
 }
@@ -40,5 +41,5 @@ export type CalibrationTelemetryPanelState = {
 
 export type RuntimeAppContext = {
 	currentApp?: SupportedApp;
-	currentContext?: import("../utils").ActionContext;
+	currentContext?: ActionContext;
 };

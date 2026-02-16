@@ -1,1 +1,2 @@
-export { AutofillAutomation, SUPPORTED_APPS } from "./flow";
+export { runAutomationCommand, SUPPORTED_APPS } from "./flow";
+export type { AutomationCommand } from "./flow";
