@@ -1172,10 +1172,10 @@ export class AutofillAutomation {
 		} else {
 			logAction("Command+H failed; using swipe fallback");
 		}
-		await sleep(0.4);
+		await sleepAfterAction("home-swipe-prep");
 		await this.dragRel(0.5, 0.96, 0.5, 0.55);
 		await sleepAfterAction("home-swipe-fallback");
-		await sleep(0.4);
+		await sleepAfterAction("home-swipe-finish");
 	}
 
 	private async openAppFromHome(iconRx: number, iconRy: number): Promise<void> {
@@ -1227,8 +1227,10 @@ export class AutofillAutomation {
 		if (!(await this.ensureMirrorFrontmost("open-app-by-search:initial-focus"))) {
 			die("Could not ensure mirror host before search launch.");
 		}
+		await sleepAfterAction("before-go-home");
 		await this.goHomeBestEffort();
 		await sleepAfterAction("post-go-home");
+		await sleepAfterAction("before-search-tap");
 
 		if (!(await this.ensureMirrorFrontmost("open-app-by-search:search-button"))) {
 			die("Could not ensure mirror host before tapping Search.");
@@ -1236,14 +1238,14 @@ export class AutofillAutomation {
 		logAction("Tapping Search icon");
 		await this.clickRel(searchPoint.relX, searchPoint.relY);
 		await sleepAfterAction("search-icon-tap");
-		await sleep(0.3);
+		await sleepAfterAction("search-icon-to-clear");
 		logAction("Clearing Search field");
 		await this.clearField();
 		await sleepAfterAction("search-clear");
 		logAction(`Typing app name '${appName}'`);
 		await this.typeText(appName);
 		await sleepAfterAction("search-typing");
-		await sleep(0.35);
+		await sleepAfterAction("typing-to-launch");
 		logAction("Tapping launch result");
 		await this.clickRel(launchPoint.relX, launchPoint.relY);
 		await sleepAfterAction("launch-result-tap");
@@ -1260,6 +1262,7 @@ export class AutofillAutomation {
 			logAction(`Search flow failed for ${app}: ${message}`);
 			logAction("Falling back to home icon launch");
 		}
+		await sleepAfterAction("search-fallback-switch");
 
 		switch (app) {
 			case "chrome":
@@ -1447,6 +1450,8 @@ export class AutofillAutomation {
 		const baseDir = outDir && outDir.length > 0 ? outDir : `./autofill_shots_${timestampSnapshot()}`;
 		mkdirSync(baseDir, { recursive: true });
 		const querySlug = sanitizeQueryForFilename(query);
+		console.log(`[${LOG_PREFIX}] Effective CAPTURE_PRE_ACTION_DELAY_SEC=${CAPTURE_PRE_ACTION_DELAY_SEC}`);
+		console.log(`[${LOG_PREFIX}] Effective CAPTURE_STEP_GAP_SEC=${CAPTURE_STEP_GAP_SEC}`);
 
 		if (CAPTURE_PRE_ACTION_DELAY_SEC > 0) {
 			console.log(`Starting capture: waiting ${CAPTURE_PRE_ACTION_DELAY_SEC}s for mirroring/host to settle before actions...`);
