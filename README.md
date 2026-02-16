@@ -42,6 +42,24 @@ bun run check-mirror
 bun run sanity-capture -- --query "a"
 ```
 
+### Pre-action delay and logging verbosity
+
+Capture flow now includes a stabilization pause before app actions:
+
+- `CAPTURE_PRE_ACTION_DELAY_SEC` (default: `4`)
+  - set to `3`/`4`/`5` to tune for your machine
+  - set to `0` to disable the wait
+
+```bash
+CAPTURE_PRE_ACTION_DELAY_SEC=5 bun run capture -- --query "a" --apps chrome
+```
+
+AppleScript/probe logging is intentionally quiet by default. Enable detailed logs with:
+
+```bash
+PRINT_WINDOW_DEBUG=1 bun run capture -- --query "a" --apps chrome
+```
+
 ### Search launch flow and base coordinates
 
 The Bun runtime now opens apps by tapping the iPhone home **Search** button first:

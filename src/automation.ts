@@ -7,6 +7,7 @@ import {
 	APP_LAUNCH_RESULT_RX,
 	APP_LAUNCH_RESULT_RY,
 	CALIBRATION_PREVIEW_INTERVAL_MS,
+	CAPTURE_PRE_ACTION_DELAY_SEC,
 	APP_OPEN_DELAY_SEC,
 	BACKSPACE_COUNT,
 	BASE_COORDINATES_FILE,
@@ -70,6 +71,10 @@ type CalibrationTelemetrySample = {
 type CalibrationTelemetryPanelState = {
 	lines: number;
 };
+
+function logAction(message: string): void {
+	console.log(`[${LOG_PREFIX}] ${message}`);
+}
 
 function asCommandResult(command: string, args: string[]): { exitCode: number; output: string } {
 	const proc = Bun.spawnSync([command, ...args], {
@@ -1153,10 +1158,11 @@ export class AutofillAutomation {
 	}
 
 	private async goHomeBestEffort(): Promise<void> {
+		logAction("Issuing Command+H");
 		if (await this.sendHostKeystroke("h", "command", "go-home-key")) {
-			logStep("go_home_best_effort: command+H issued");
+			logAction("Command+H sent");
 		} else {
-			logStep("go_home_best_effort: command+H failed; continuing with swipe-only fallback");
+			logAction("Command+H failed; using swipe fallback");
 		}
 		await sleep(0.4);
 		await this.dragRel(0.5, 0.96, 0.5, 0.55);
@@ -1208,6 +1214,7 @@ export class AutofillAutomation {
 		const searchPoint = this.getSearchButtonProfilePoint();
 		const launchPoint = this.getLaunchResultProfilePoint();
 
+		logAction(`Opening ${app} via Search flow`);
 		if (!(await this.ensureMirrorFrontmost("open-app-by-search:initial-focus"))) {
 			die("Could not ensure mirror host before search launch.");
 		}
@@ -1216,23 +1223,28 @@ export class AutofillAutomation {
 		if (!(await this.ensureMirrorFrontmost("open-app-by-search:search-button"))) {
 			die("Could not ensure mirror host before tapping Search.");
 		}
+		logAction("Tapping Search icon");
 		await this.clickRel(searchPoint.relX, searchPoint.relY);
 		await sleep(0.3);
+		logAction("Clearing Search field");
 		await this.clearField();
+		logAction(`Typing app name '${appName}'`);
 		await this.typeText(appName);
 		await sleep(0.35);
+		logAction("Tapping launch result");
 		await this.clickRel(launchPoint.relX, launchPoint.relY);
 		await sleep(APP_OPEN_DELAY_SEC);
 	}
 
 	private async openAppBySearchWithFallback(app: SupportedApp): Promise<void> {
+		logAction(`Starting app launch for ${app}`);
 		try {
 			await this.openAppBySearch(app);
 			return;
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			logStep(`open_app_by_search(${app}) failed: ${message}`);
-			logStep("Falling back to home icon launch");
+			logAction(`Search flow failed for ${app}: ${message}`);
+			logAction("Falling back to home icon launch");
 		}
 
 		switch (app) {
@@ -1301,6 +1313,7 @@ export class AutofillAutomation {
 	private async runAppFlow(app: SupportedApp, query: string, outBase: string, querySlug: string): Promise<void> {
 		const appDir = `${outBase}/${app}`;
 		this.focusMirroring();
+		logAction(`Starting app flow for ${app} (query="${query}", outBase="${outBase}")`);
 		await sleep(0.2);
 		if (!(await this.ensureMirrorFrontmost(`run-app-${app}`))) {
 			die(`Could not return focus to mirror host for ${app} flow.`);
@@ -1418,6 +1431,13 @@ export class AutofillAutomation {
 		const baseDir = outDir && outDir.length > 0 ? outDir : `./autofill_shots_${timestampSnapshot()}`;
 		mkdirSync(baseDir, { recursive: true });
 		const querySlug = sanitizeQueryForFilename(query);
+
+		if (CAPTURE_PRE_ACTION_DELAY_SEC > 0) {
+			console.log(`Starting capture: waiting ${CAPTURE_PRE_ACTION_DELAY_SEC}s for mirroring/host to settle before actions...`);
+			await sleep(CAPTURE_PRE_ACTION_DELAY_SEC);
+		} else {
+			console.log("Starting capture: no pre-action delay configured.");
+		}
 
 		for (const app of apps) {
 			await this.runAppFlow(app, query, baseDir, querySlug);

@@ -93,12 +93,28 @@ export const BACKSPACE_COUNT = 40;
 
 export const PRINT_WINDOW_DEBUG = (() => {
 	const raw = process.env.PRINT_WINDOW_DEBUG;
-	if (raw === undefined) return true;
+	if (raw === undefined) return false;
 	if (raw === "") return true;
 	if (raw === "0") return false;
 	if (raw === "false" || raw === "False" || raw === "FALSE") return false;
 	const parsed = Number(raw);
 	return Number.isNaN(parsed) ? true : parsed !== 0;
+})();
+
+export const CAPTURE_PRE_ACTION_DELAY_SEC = (() => {
+	const raw = process.env.CAPTURE_PRE_ACTION_DELAY_SEC;
+	const defaultDelay = 4;
+	if (raw === undefined || raw.length === 0) {
+		return defaultDelay;
+	}
+	const parsed = Number(raw);
+	if (Number.isFinite(parsed) && parsed >= 0) {
+		return parsed;
+	}
+	if (PRINT_WINDOW_DEBUG) {
+		console.error(`[${LOG_PREFIX}] Invalid CAPTURE_PRE_ACTION_DELAY_SEC='${raw}', using default ${defaultDelay}s.`);
+	}
+	return defaultDelay;
 })();
 
 export const RELATIVE_TOKEN_RE = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|[0-9]*\.[0-9]+)$/;
