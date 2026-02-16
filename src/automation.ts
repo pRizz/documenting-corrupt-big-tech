@@ -6,6 +6,8 @@ import {
 	APP_LAUNCH_QUERY,
 	ACTION_CALIBRATION_DEFINITIONS,
 	getActionDefinition,
+	getAppFlowDefinition,
+	parseActionId,
 	APP_LAUNCH_RESULT_RX,
 	APP_LAUNCH_RESULT_RY,
 	CALIBRATION_PREVIEW_INTERVAL_MS,
@@ -17,6 +19,8 @@ import {
 	BASE_COORDINATES_FILE,
 	type ActionCalibrationDefinition,
 	type ActionPointsByApp,
+	type ActionContext,
+	type AppFlowDefinition,
 	MIRROR_HOME_SHORTCUT_KEY,
 	MIRROR_SEARCH_SHORTCUT_KEY,
 	CHROME_ICON_RX,
@@ -78,6 +82,11 @@ type CalibrationTelemetrySample = {
 
 type CalibrationTelemetryPanelState = {
 	lines: number;
+};
+
+type RuntimeAppContext = {
+	currentApp?: SupportedApp;
+	currentContext?: ActionContext;
 };
 
 function logAction(message: string): void {
@@ -1368,6 +1377,148 @@ export class AutofillAutomation {
 		return steps;
 	}
 
+	private getFlowDefinition(app: SupportedApp): AppFlowDefinition {
+		return getAppFlowDefinition(app);
+	}
+
+	private getFlowSearchSteps(app: SupportedApp, flow: AppFlowDefinition): string {
+		return flow.searchActions?.fallbackSearchSteps ?? this.getSearchStepsFromProfile(app);
+	}
+
+	private async captureActionPoint(
+		app: SupportedApp,
+		action: string,
+		flow: AppFlowDefinition,
+		actionPoints?: ActionPointsByApp,
+		options: { required?: boolean; label?: string } = {},
+	): Promise<boolean> {
+		const definition = this.getActionDefinitionForTarget(app, action);
+		const point = this.getActionPoint(app, action, actionPoints);
+		const actionId = `${app}:${action}`;
+
+		if (point) {
+			logAction(`${options.label ?? `action ${actionId}`}: using calibrated point`);
+			await this.clickRel(point.relX, point.relY);
+			await sleepAfterAction(`capture-point:${actionId}`, CAPTURE_FAST_STEP_GAP_SEC);
+			return true;
+		}
+
+		if (definition?.fallbackTapSteps) {
+			logAction(`${options.label ?? `action ${actionId}`}: using fallback tap steps`);
+			await this.tapSequence(definition.fallbackTapSteps);
+			await sleepAfterAction(`capture-point:${actionId}:fallback`, CAPTURE_FAST_STEP_GAP_SEC);
+			return false;
+		}
+
+		if (options.required !== false && this.isActionRequiredForCapture(app, action, flow)) {
+			die(`Missing required action point: ${actionId}\nCalibrate with: bun run capture -- --calibrate-action ${actionId}`);
+		}
+
+		logAction(`capturePoint(${actionId}): missing optional point`);
+		return false;
+	}
+
+	private async runFlowPostLaunchActions(
+		app: SupportedApp,
+		flow: AppFlowDefinition,
+		actionPoints?: ActionPointsByApp,
+	): Promise<void> {
+		for (const actionId of flow.postLaunchActions ?? []) {
+			const parsed = parseActionId(actionId);
+			if (parsed.app !== app) {
+				continue;
+			}
+			await this.captureActionPoint(app, parsed.action, flow, actionPoints, {
+				required: this.isActionRequiredForCapture(app, parsed.action, flow),
+				label: `post-launch ${actionId}`,
+			});
+		}
+	}
+
+	private async runAppSearchPlacement(
+		app: SupportedApp,
+		flow: AppFlowDefinition,
+		actionPoints?: ActionPointsByApp,
+	): Promise<void> {
+		const inAppSearchPoint = flow.searchActions?.inAppSearchPoint;
+		if (inAppSearchPoint) {
+			if (
+				await this.captureActionPoint(app, inAppSearchPoint, flow, actionPoints, {
+					required: this.isActionRequiredForCapture(app, inAppSearchPoint, flow),
+					label: `${app}:search placement (${inAppSearchPoint})`,
+				})
+			) {
+				return;
+			}
+		}
+
+		const fallback = this.getFlowSearchSteps(app, flow);
+		logAction(`runAppSearchPlacement(${app}): using fallback search steps`);
+		await this.tapSequence(fallback);
+	}
+
+	private async transitionToCalibrationContext(
+		definition: ActionCalibrationDefinition,
+		runtimeContext: RuntimeAppContext,
+		actionPoints?: ActionPointsByApp,
+	): Promise<void> {
+		const parsed = parseActionId(definition.id);
+		const app = parsed.app;
+		const flow = this.getFlowDefinition(app);
+		const targetContext: ActionContext = definition.autoNavigateTo ?? "app-active";
+
+		if (runtimeContext.currentApp === app && runtimeContext.currentContext === targetContext) {
+			return;
+		}
+
+		logAction(`transitionToCalibrationContext(${definition.id}): ${runtimeContext.currentContext ?? "none"} -> ${targetContext}`);
+		switch (targetContext) {
+			case "home":
+				await this.goHomeBestEffort();
+				break;
+			case "search-entry":
+				await this.runSearchEntry(app, { actionPoints, stopAfterSearchEntry: true });
+				break;
+			case "app-active":
+				await this.openAppBySearchWithFallback(app, actionPoints);
+				break;
+			case "search-focused":
+				await this.openAppBySearchWithFallback(app, actionPoints);
+				if ((flow.postLaunchActions?.length ?? 0) > 0) {
+					await this.runFlowPostLaunchActions(app, flow, actionPoints);
+				}
+				break;
+			case "custom":
+			default:
+				if (runtimeContext.currentApp !== app) {
+					await this.openAppBySearchWithFallback(app, actionPoints);
+				}
+		}
+
+		runtimeContext.currentApp = app;
+		runtimeContext.currentContext = targetContext;
+	}
+
+	private getActionPoint(app: SupportedApp, action: string, appActionPoints?: ActionPointsByApp): BaseCoordinatePoint | undefined {
+		const actionPoints = appActionPoints ?? this.getCalibrationProfile().points.appActionPoints;
+		if (!actionPoints) {
+			return undefined;
+		}
+		const appActionPoint = actionPoints[app];
+		if (!appActionPoint) {
+			return undefined;
+		}
+		return appActionPoint[action];
+	}
+
+	private getActionPointForTarget(
+		app: SupportedApp,
+		action: string,
+		appActionPoints?: ActionPointsByApp,
+	): BaseCoordinatePoint | undefined {
+		return this.getActionPoint(app, action, appActionPoints);
+	}
+
 	private getSearchButtonProfilePoint(): BaseCoordinatePoint {
 		return this.getCalibrationProfile().points.homeSearchButton;
 	}
@@ -1398,110 +1549,178 @@ export class AutofillAutomation {
 		return point;
 	}
 
+	private resolveActionPointFromActionId(
+		actionId: string,
+		appActionPoints?: ActionPointsByApp,
+	): { app: SupportedApp; action: string; point?: BaseCoordinatePoint } {
+		const parsed = parseActionId(actionId);
+		const point = this.getActionPoint(parsed.app, parsed.action, appActionPoints);
+		return { app: parsed.app, action: parsed.action, point };
+	}
+
+	private isActionRequiredForCapture(app: SupportedApp, action: string, flow: AppFlowDefinition): boolean {
+		const definition = this.getActionDefinitionForTarget(app, action);
+		if (!definition) {
+			return false;
+		}
+		if (definition.requiredForCapture) {
+			return true;
+		}
+		if ((flow.requiredCalibrationForCapture ?? []).includes(`${app}:${action}`)) {
+			return true;
+		}
+		return false;
+	}
+
 	private getAllCalibrationDefinitionsForAllMode(): ActionCalibrationDefinition[] {
-		return ACTION_CALIBRATION_DEFINITIONS.filter((definition) => definition.skipInCalibrateAll !== true);
-	}
+		const candidates = ACTION_CALIBRATION_DEFINITIONS.filter((definition) => definition.skipInCalibrateAll !== true);
+		const indexed = new Map<string, ActionCalibrationDefinition>(candidates.map((definition) => [definition.id, definition]));
+		const resolved = new Set<string>();
+		const visiting = new Set<string>();
+		const ordered: ActionCalibrationDefinition[] = [];
 
-	private getActionPoint(app: SupportedApp, action: string): BaseCoordinatePoint | undefined {
-		const actionPoints = this.getCalibrationProfile().points.appActionPoints;
-		if (!actionPoints) {
-			return undefined;
+		const visit = (definition: ActionCalibrationDefinition): void => {
+			if (resolved.has(definition.id)) {
+				return;
+			}
+			if (visiting.has(definition.id)) {
+				die(`Circular calibration prerequisite detected: ${definition.id}`);
+			}
+
+			visiting.add(definition.id);
+			for (const rawPrerequisite of definition.prerequisites ?? []) {
+				const prerequisite = indexed.get(rawPrerequisite);
+				if (prerequisite) {
+					visit(prerequisite);
+				}
+			}
+			visiting.delete(definition.id);
+			resolved.add(definition.id);
+			ordered.push(definition);
+			};
+
+		for (const definition of candidates) {
+			visit(definition);
 		}
-		const appActionPoints = actionPoints[app];
-		if (!appActionPoints) {
-			return undefined;
-		}
-		return appActionPoints[action];
+
+		return ordered;
 	}
 
-	private async prepareChromeIncognitoActions(): Promise<void> {
-		const ellipsisPoint = this.getRequiredActionPointForCapture("chrome", "ellipsis", "Chrome ellipsis action");
-		const incognitoTabPoint = this.getRequiredActionPointForCapture(
-			"chrome",
-			"newIncognitoTab",
-			"Chrome incognito action",
-		);
-
-		logAction("Chrome incognito flow: tapping Chrome ellipsis");
-		await this.clickRel(ellipsisPoint.relX, ellipsisPoint.relY);
-		await sleepAfterAction("chrome-ellipsis-tap");
-
-		logAction("Chrome incognito flow: tapping Chrome New Incognito Tab");
-		await this.clickRel(incognitoTabPoint.relX, incognitoTabPoint.relY);
-		await sleepAfterAction("chrome-new-incognito-tab-tap");
-	}
-
-	private async openAppBySearch(app: SupportedApp): Promise<void> {
-		logAction(`openAppBySearch(${app}): begin`);
+	private async runSearchEntry(
+		app: SupportedApp,
+		options: { actionPoints?: ActionPointsByApp; stopAfterSearchEntry?: boolean } = {},
+	): Promise<void> {
 		const appName = APP_LAUNCH_QUERY[app];
-		const searchIconPoint = this.getActionPoint(app, "searchIcon");
+		const flow = this.getFlowDefinition(app);
+		const searchIconPoint = this.getActionPoint(app, "searchIcon", options.actionPoints);
 		const searchPoint = searchIconPoint ?? this.getSearchButtonProfilePoint();
 
 		logAction(`Opening ${app} via Search flow`);
-		logAction(`openAppBySearch(${app}): checking initial frontmost`);
+		logAction(`runSearchEntry(${app}): checking initial frontmost`);
 		if (!(await this.ensureMirrorFrontmost("open-app-by-search:initial-focus"))) {
 			die("Could not ensure mirror host before search launch.");
 		}
-		logAction(`openAppBySearch(${app}): initial frontmost ok`);
+		logAction(`runSearchEntry(${app}): initial frontmost ok`);
 		await sleepAfterAction("before-go-home", CAPTURE_FAST_STEP_GAP_SEC);
-		logAction(`openAppBySearch(${app}): entering goHomeBestEffort`);
+
+		if (flow.launch === "legacyHomeIconOnly") {
+			await this.openAppFromHome(app);
+			return;
+		}
+
+		logAction(`runSearchEntry(${app}): entering goHomeBestEffort`);
 		await this.goHomeBestEffort();
-		logAction(`openAppBySearch(${app}): goHomeBestEffort complete`);
+		logAction(`runSearchEntry(${app}): goHomeBestEffort complete`);
 		await sleepAfterAction("post-go-home", CAPTURE_FAST_STEP_GAP_SEC);
 		await sleepAfterAction("before-search-tap", CAPTURE_FAST_STEP_GAP_SEC);
 
 		let usedSearchShortcut = false;
-		if (CAPTURE_USE_MIRROR_SHORTCUTS) {
+		if (CAPTURE_USE_MIRROR_SHORTCUTS && flow.launch !== "searchIcon") {
 			logAction("Issuing Command+3 (Mirroring Search)");
-			if (await this.sendHostKeystroke(MIRROR_SEARCH_SHORTCUT_KEY, "command", `open-app-by-search:${app}-search-shortcut`)) {
+			if (
+				await this.sendHostKeystroke(MIRROR_SEARCH_SHORTCUT_KEY, "command", `run-search-entry:${app}-search-shortcut`)
+			) {
 				logAction("Command+3 sent");
 				usedSearchShortcut = true;
 			} else {
 				logAction("Command+3 failed, using Search icon tap fallback");
 			}
-		} else {
+		} else if (!CAPTURE_USE_MIRROR_SHORTCUTS) {
 			logAction("Skipping Mirroring Search shortcut because CAPTURE_USE_MIRROR_SHORTCUTS=0");
+		} else if (flow.launch === "searchIcon") {
+			logAction("runSearchEntry configured for search icon flow (shortcut suppressed by launch mode).");
 		}
 
 		if (!usedSearchShortcut) {
-			if (!(await this.ensureMirrorFrontmost("open-app-by-search:search-button"))) {
+			if (!(await this.ensureMirrorFrontmost("run-search-entry:search-button"))) {
 				die("Could not ensure mirror host before tapping Search.");
 			}
-			logAction(`openAppBySearch(${app}): search-button frontmost ok`);
+			logAction(`runSearchEntry(${app}): search-button frontmost ok`);
 			logAction("Tapping Search icon");
 			if (searchIconPoint) {
-				logAction(`openAppBySearch(${app}): using calibrated searchIcon action point`);
+				logAction(`runSearchEntry(${app}): using calibrated searchIcon action point`);
 			} else {
-				logAction(`openAppBySearch(${app}): using fallback home search point`);
+				logAction(`runSearchEntry(${app}): using fallback home search point`);
 			}
 			await this.clickRel(searchPoint.relX, searchPoint.relY);
-			logAction(`openAppBySearch(${app}): search icon tapped`);
+			logAction(`runSearchEntry(${app}): search icon tapped`);
 			await sleepAfterAction("search-icon-tap", CAPTURE_FAST_STEP_GAP_SEC);
 			await sleepAfterAction("search-icon-to-clear", CAPTURE_FAST_STEP_GAP_SEC);
 		} else {
 			await sleepAfterAction("search-shortcut", CAPTURE_FAST_STEP_GAP_SEC);
 		}
 
-		logAction("Clearing Search field");
+		if (flow.launch === "searchIcon" || options.stopAfterSearchEntry) {
+			return;
+		}
+
+		logAction(`runSearchEntry(${app}): clearing Search field`);
 		await this.clearField();
 		await sleepAfterAction("search-clear", CAPTURE_FAST_STEP_GAP_SEC);
 		logAction(`Typing app name '${appName}'`);
 		await this.typeText(appName, CAPTURE_FAST_STEP_GAP_SEC);
 		await sleepAfterAction("search-typing", CAPTURE_FAST_STEP_GAP_SEC);
 		await sleepAfterAction("typing-to-launch", CAPTURE_FAST_STEP_GAP_SEC);
-		logAction("Submitting search with Enter");
-		if (!(await this.sendHostKeystroke("return", "", `open-app-by-search:${app}-submit`))) {
-			die(`Could not submit search for ${app}.`);
+	}
+
+	private async openAppBySearch(app: SupportedApp, actionPoints?: ActionPointsByApp): Promise<void> {
+		const flow = this.getFlowDefinition(app);
+		logAction(`openAppBySearch(${app}): begin`);
+		await this.runSearchEntry(app, { actionPoints });
+		logAction(`openAppBySearch(${app}): entry ready`);
+		if (flow.launch === "searchIcon") {
+			await this.ensureMirrorFrontmost("open-app-by-search:home-search");
+			logAction(`openAppBySearch(${app}): search icon launch mode does not support app query submission`);
+			return;
+		}
+
+		switch (flow.searchSubmitMode) {
+			case "enter": {
+				logAction("Submitting search with Enter");
+				if (!(await this.sendHostKeystroke("return", "", `open-app-by-search:${app}-submit`))) {
+					die(`Could not submit search for ${app}.`);
+				}
+				break;
+			}
+			case "tapResult": {
+				logAction(`Submitting search for ${app} with launch-result tap`);
+				const launchTap = this.getLaunchResultProfilePoint();
+				await this.clickRel(launchTap.relX, launchTap.relY);
+				await sleepAfterAction("search-submit", CAPTURE_FAST_STEP_GAP_SEC);
+				break;
+			}
+			default:
+				die(`Unsupported search submit mode for app '${app}'.`);
 		}
 		await sleepAfterAction("search-submit", CAPTURE_FAST_STEP_GAP_SEC);
 		logAction(`openAppBySearch(${app}): complete`);
 	}
 
-	private async openAppBySearchWithFallback(app: SupportedApp): Promise<void> {
+	private async openAppBySearchWithFallback(app: SupportedApp, actionPoints?: ActionPointsByApp): Promise<void> {
 		logAction(`Starting app launch for ${app}`);
 		try {
 			logAction(`openAppBySearchWithFallback(${app}): trying search flow`);
-			await this.openAppBySearch(app);
+			await this.openAppBySearch(app, actionPoints);
 			logAction(`openAppBySearchWithFallback(${app}): search flow succeeded`);
 			return;
 		} catch (error) {
@@ -1562,8 +1781,8 @@ export class AutofillAutomation {
 			if (!(await this.ensureMirrorFrontmost(`type-char-${app}`))) {
 				die(`Could not ensure mirror host during character typing at index ${i}.`);
 			}
-		const ch = query.charAt(i);
-		this.runCliclick(`t:${escapeTapText(ch)}`);
+			const ch = query.charAt(i);
+			this.runCliclick(`t:${escapeTapText(ch)}`);
 			await sleep(CHAR_DELAY_SEC);
 			const prefix = String(i + 1).padStart(2, "0");
 			this.screenshotContent(`${outdir}/${app}_${prefix}_${querySlug}.png`);
@@ -1572,6 +1791,7 @@ export class AutofillAutomation {
 
 	private async runAppFlow(app: SupportedApp, query: string, outBase: string, querySlug: string): Promise<void> {
 		const appDir = `${outBase}/${app}`;
+		const flow = this.getFlowDefinition(app);
 		this.focusMirroring();
 		logAction(`Starting app flow for ${app} (query="${query}", outBase="${outBase}")`);
 		await sleepAfterAction("focus-mirroring-init", CAPTURE_FAST_STEP_GAP_SEC);
@@ -1581,42 +1801,11 @@ export class AutofillAutomation {
 		await sleepAfterAction("run-app-frontmost", CAPTURE_FAST_STEP_GAP_SEC);
 		this.logFrontmostState("run-app:post-focus");
 		this.getCalibrationProfile();
-		const steps = this.getSearchStepsFromProfile(app);
-
-		switch (app) {
-			case "chrome":
-				logAction(`runAppFlow(${app}): entering chrome flow`);
-				await this.openAppBySearchWithFallback("chrome");
-				await this.prepareChromeIncognitoActions();
-				const chromeSearchBarPoint = this.getActionPoint("chrome", "searchBar");
-				if (chromeSearchBarPoint) {
-					logAction(`runAppFlow(${app}): using calibrated chrome:searchBar point`);
-					await this.clickRel(chromeSearchBarPoint.relX, chromeSearchBarPoint.relY);
-					await sleepAfterAction("chrome-searchbar-point", CAPTURE_FAST_STEP_GAP_SEC);
-				} else {
-					logAction(`runAppFlow(${app}): no calibrated chrome:searchBar; using fallback search steps`);
-					await this.tapSequence(steps);
-				}
-				await this.clearField();
-				await this.typeAndCapturePerChar("chrome", query, appDir, querySlug);
-				break;
-			case "instagram":
-				logAction(`runAppFlow(${app}): entering instagram flow`);
-				await this.openAppBySearchWithFallback("instagram");
-				await this.tapSequence(steps);
-				await this.clearField();
-				await this.typeAndCapturePerChar("instagram", query, appDir, querySlug);
-				break;
-			case "tiktok":
-				logAction(`runAppFlow(${app}): entering tiktok flow`);
-				await this.openAppBySearchWithFallback("tiktok");
-				await this.tapSequence(steps);
-				await this.clearField();
-				await this.typeAndCapturePerChar("tiktok", query, appDir, querySlug);
-				break;
-			default:
-				die(`Unknown app: ${app}`);
-		}
+		await this.openAppBySearchWithFallback(app);
+		await this.runFlowPostLaunchActions(app, flow);
+		await this.runAppSearchPlacement(app, flow);
+		await this.clearField();
+		await this.typeAndCapturePerChar(app, query, appDir, querySlug);
 	}
 
 	public printWindowMode(): void {
@@ -1681,6 +1870,7 @@ export class AutofillAutomation {
 		const mergedAppActionPoints: ActionPointsByApp = {
 			...(existingProfile?.points.appActionPoints ?? {}),
 		};
+		const runtimeContext: RuntimeAppContext = {};
 
 		console.log("Calibrating all supported action points.");
 		console.log(
@@ -1693,10 +1883,8 @@ export class AutofillAutomation {
 		});
 
 		for (const definition of orderedDefinitions) {
-			const [app, action] = definition.id.split(":");
-			if (!app || !action) {
-				continue;
-			}
+			await this.transitionToCalibrationContext(definition, runtimeContext, mergedAppActionPoints);
+			const { app, action } = this.resolveActionPointFromActionId(definition.id);
 			const capturedPoint = await this.capturePointFromMouse(`${definition.label} (${definition.id})`, contentRegion, {
 				tapAfterCapture: true,
 			});

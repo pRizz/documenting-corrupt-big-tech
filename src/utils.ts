@@ -34,6 +34,22 @@ export interface Region {
 	height: number;
 }
 
+export type SearchEntryMode = "shortcut" | "searchIcon" | "homeThenSearchIcon" | "legacyHomeIconOnly";
+export type ActionContext = "home" | "app-launch" | "search-focused" | "search-entry" | "app-active" | "custom";
+export type SearchSubmitMode = "enter" | "tapResult";
+
+export interface AppFlowDefinition {
+	app: SupportedApp;
+	launch: SearchEntryMode;
+	searchSubmitMode: SearchSubmitMode;
+	postLaunchActions?: string[];
+	searchActions?: {
+		inAppSearchPoint?: string;
+		fallbackSearchSteps?: string;
+	};
+	requiredCalibrationForCapture?: string[];
+}
+
 export interface BaseCoordinatePoint {
 	relX: number;
 	relY: number;
@@ -65,6 +81,19 @@ export interface ActionCalibrationDefinition {
 	fallbackTapSteps?: string;
 	requiredForCapture?: boolean;
 	skipInCalibrateAll?: boolean;
+	requirementsHint?: string;
+	autoNavigateTo?: ActionContext;
+	autoNavigateFrom?: ActionContext;
+	prerequisites?: string[];
+	captureHint?: string;
+}
+
+export interface CalibratableActionTransition {
+	id: string;
+	label: string;
+	forApp: SupportedApp;
+	requiredForCapture?: boolean;
+	prerequisites?: string[];
 }
 
 export const LOG_PREFIX = "iphone-mirror-autofill";
@@ -113,54 +142,96 @@ export const CHROME_SEARCH_STEPS = "0.50,0.10";
 export const INSTAGRAM_SEARCH_STEPS = "0.20,0.95;0.50,0.12";
 export const TIKTOK_SEARCH_STEPS = "0.92,0.08;0.50,0.12";
 
+export const APP_FLOW_DEFINITIONS: Readonly<Record<SupportedApp, AppFlowDefinition>> = {
+	chrome: {
+		app: "chrome",
+		launch: "shortcut",
+		searchSubmitMode: "enter",
+		postLaunchActions: ["chrome:ellipsis", "chrome:newIncognitoTab"],
+		searchActions: {
+			inAppSearchPoint: "searchBar",
+			fallbackSearchSteps: CHROME_SEARCH_STEPS,
+		},
+		requiredCalibrationForCapture: ["chrome:ellipsis", "chrome:newIncognitoTab"],
+	},
+	instagram: {
+		app: "instagram",
+		launch: "shortcut",
+		searchSubmitMode: "enter",
+		searchActions: {
+			fallbackSearchSteps: INSTAGRAM_SEARCH_STEPS,
+		},
+	},
+	tiktok: {
+		app: "tiktok",
+		launch: "shortcut",
+		searchSubmitMode: "enter",
+		searchActions: {
+			fallbackSearchSteps: TIKTOK_SEARCH_STEPS,
+		},
+	},
+};
+
 export const ACTION_CALIBRATION_DEFINITIONS: ReadonlyArray<ActionCalibrationDefinition> = [
 	{
 		id: "chrome:ellipsis",
 		label: "Chrome ellipsis/options",
 		forApp: "chrome",
+		autoNavigateTo: "app-active",
+		requirementsHint: "Open Chrome and tap the ellipsis/options button before the incognito action.",
 		requiredForCapture: true,
 	},
 	{
 		id: "chrome:newIncognitoTab",
 		label: "Chrome new incognito tab",
 		forApp: "chrome",
+		autoNavigateTo: "app-active",
+		prerequisites: ["chrome:ellipsis"],
 		requiredForCapture: true,
 	},
 	{
 		id: "chrome:searchBar",
 		label: "Chrome search bar",
 		forApp: "chrome",
+		autoNavigateTo: "search-focused",
+		prerequisites: ["chrome:ellipsis", "chrome:newIncognitoTab"],
 		fallbackTapSteps: CHROME_SEARCH_STEPS,
 	},
 	{
 		id: "chrome:searchIcon",
 		label: "Chrome search icon",
 		forApp: "chrome",
+		autoNavigateTo: "search-entry",
 	},
 	{
 		id: "instagram:searchIcon",
 		label: "Instagram search icon",
 		forApp: "instagram",
+		autoNavigateTo: "search-entry",
 	},
 	{
 		id: "tiktok:searchIcon",
 		label: "TikTok search icon",
 		forApp: "tiktok",
+		autoNavigateTo: "search-entry",
 	},
 	{
 		id: "chrome:homeIcon",
 		label: "Chrome home icon",
 		forApp: "chrome",
+		autoNavigateTo: "home",
 	},
 	{
 		id: "instagram:homeIcon",
 		label: "Instagram home icon",
 		forApp: "instagram",
+		autoNavigateTo: "home",
 	},
 	{
 		id: "tiktok:homeIcon",
 		label: "TikTok home icon",
 		forApp: "tiktok",
+		autoNavigateTo: "home",
 	},
 ];
 
@@ -177,6 +248,25 @@ export function isSupportedActionTarget(value: string): value is `${SupportedApp
 		return false;
 	}
 	return ACTION_CALIBRATION_DEFINITIONS.some((definition) => definition.id === `${app}:${trim(rawAction)}`);
+}
+
+export function parseActionId(actionId: string): { app: SupportedApp; action: string } {
+	const [rawApp, rawAction, ...rest] = actionId.split(":");
+	if (rawApp === undefined || rawAction === undefined || rest.length > 0) {
+		die(`Invalid action id '${actionId}'. Expected app:action format.`);
+	}
+
+	const app = trim(rawApp).toLowerCase();
+	if (app !== "chrome" && app !== "instagram" && app !== "tiktok") {
+		die(`Unknown app '${app}' in action id '${actionId}'.`);
+	}
+
+	const action = trim(rawAction);
+	if (action.length === 0) {
+		die(`Invalid action id '${actionId}'. Expected app:action format.`);
+	}
+
+	return { app: app as SupportedApp, action };
 }
 
 export function parseActionTarget(rawValue: string): { app: SupportedApp; action: string } {
@@ -210,6 +300,14 @@ export function getActionDefinition(app: SupportedApp, action: string): ActionCa
 
 export function getActionTargetsForApp(app: SupportedApp): ActionCalibrationDefinition[] {
 	return ACTION_CALIBRATION_DEFINITIONS.filter((definition) => definition.forApp === app);
+}
+
+export function getAppFlowDefinition(app: SupportedApp): AppFlowDefinition {
+	return APP_FLOW_DEFINITIONS[app];
+}
+
+export function getCalibratableActionsForContext(context: ActionContext): ActionCalibrationDefinition[] {
+	return ACTION_CALIBRATION_DEFINITIONS.filter((definition) => definition.autoNavigateTo === context);
 }
 
 export const CLEAR_MODE = "select_all";
