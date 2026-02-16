@@ -1,5 +1,5 @@
 import type { AppFlowMode, CliConfig, SupportedApp } from "./utils";
-import { die, formatUsage, parseNumberToken } from "./utils";
+import { die, formatUsage, parseActionTarget, parseNumberToken } from "./utils";
 import { AutofillAutomation, SUPPORTED_APPS } from "./automation";
 
 export interface ParsedCapturePlan {
@@ -108,6 +108,24 @@ export function parseCaptureArgs(argv: string[]): ParsedCapturePlan {
 				config.calibrate = true;
 				break;
 			}
+			case "--calibrate-action": {
+				if (explicitModeSet && mode !== "calibrate-action") {
+					die("Only one mode flag may be provided.");
+				}
+				explicitModeSet = true;
+				mode = "calibrate-action";
+				if (index + 1 >= argv.length) {
+					die("--calibrate-action requires a value");
+				}
+				const rawCalibrateAction = argv[index + 1];
+				if (rawCalibrateAction === undefined) {
+					die("--calibrate-action requires a value");
+				}
+				parseActionTarget(rawCalibrateAction);
+				config.calibrateAction = rawCalibrateAction;
+				index += 1;
+				break;
+			}
 			case "--coord-to-rel": {
 				if (index + 2 >= argv.length) {
 					die("--coord-to-rel requires X and Y");
@@ -144,8 +162,8 @@ export function parseCaptureArgs(argv: string[]): ParsedCapturePlan {
 					die("--point-check requires RX and RY");
 				}
 				config.pointCheck = [
-					parseNumberToken("--point-check RX", x),
-					parseNumberToken("--point-check RY", y),
+					parseNumberToken("--point-check X", x),
+					parseNumberToken("--point-check Y", y),
 				];
 				index += 2;
 				break;
@@ -190,6 +208,14 @@ export async function runCaptureMode(plan: ParsedCapturePlan): Promise<void> {
 		case "calibrate":
 			await automation.calibrateMode();
 			return;
+		case "calibrate-action": {
+			if (!plan.config.calibrateAction) {
+				die("Missing --calibrate-action arguments.");
+			}
+			const { app, action } = parseActionTarget(plan.config.calibrateAction);
+			await automation.calibrateAction(app, action);
+			return;
+		}
 		case "coord-to-rel": {
 			if (!plan.config.coordToRel) {
 				die("Missing --coord-to-rel arguments.");

@@ -4,14 +4,20 @@ import { clearLine, createInterface, cursorTo, moveCursor } from "node:readline"
 
 import {
 	APP_LAUNCH_QUERY,
+	ACTION_CALIBRATION_DEFINITIONS,
+	getActionDefinition,
 	APP_LAUNCH_RESULT_RX,
 	APP_LAUNCH_RESULT_RY,
 	CALIBRATION_PREVIEW_INTERVAL_MS,
 	CAPTURE_PRE_ACTION_DELAY_SEC,
 	CAPTURE_STEP_GAP_SEC,
-	APP_OPEN_DELAY_SEC,
+	CAPTURE_USE_MIRROR_SHORTCUTS,
+	CAPTURE_FAST_STEP_GAP_SEC,
 	BACKSPACE_COUNT,
 	BASE_COORDINATES_FILE,
+	type ActionPointsByApp,
+	MIRROR_HOME_SHORTCUT_KEY,
+	MIRROR_SEARCH_SHORTCUT_KEY,
 	CHROME_ICON_RX,
 	CHROME_ICON_RY,
 	CHROME_SEARCH_STEPS,
@@ -248,12 +254,12 @@ function renderPreviewPanel(text: string, previous: CalibrationTelemetryPanelSta
 		cursorTo(process.stdout, 0);
 	}
 
-	for (let i = 0; i < targetLines; i += 1) {
-		clearLine(process.stdout, 0);
-		cursorTo(process.stdout, 0);
-		if (i < lines.length) {
-			process.stdout.write(lines[i]);
-		}
+		for (let i = 0; i < targetLines; i += 1) {
+			clearLine(process.stdout, 0);
+			cursorTo(process.stdout, 0);
+			if (i < lines.length) {
+				process.stdout.write(lines[i] ?? "");
+			}
 		if (i < targetLines - 1) {
 			process.stdout.write("\n");
 		}
@@ -503,43 +509,78 @@ export class AutofillAutomation {
 		const homeSearchButton = this.validateCalibrationPoint(pointsObj.homeSearchButton, "profile.points.homeSearchButton");
 		const launchResultTap = this.validateCalibrationPoint(pointsObj.launchResultTap, "profile.points.launchResultTap");
 
-		const appSearchStepsRaw = pointsObj.appSearchSteps;
-		if (typeof appSearchStepsRaw !== "object" || appSearchStepsRaw === null) {
-			die("Invalid profile.points.appSearchSteps: expected map of app names to tap sequences.");
-		}
-
-		const appSearchStepsObj = appSearchStepsRaw as Record<string, unknown>;
-		const appSearchSteps: Record<SupportedApp, string> = {
-			chrome: "",
-			instagram: "",
-			tiktok: "",
-		};
-
-		for (const app of SUPPORTED_APPS) {
-			const rawStep = appSearchStepsObj[app];
-			if (typeof rawStep !== "string" || trim(rawStep).length === 0) {
-				die(`Invalid profile.points.appSearchSteps.${app}: expected non-empty string.`);
+			const appSearchStepsRaw = pointsObj.appSearchSteps;
+			if (typeof appSearchStepsRaw !== "object" || appSearchStepsRaw === null) {
+				die("Invalid profile.points.appSearchSteps: expected map of app names to tap sequences.");
 			}
-			try {
-				parseTapSteps(rawStep, `profile.points.appSearchSteps.${app}`);
-			} catch {
-				die(`Invalid profile.points.appSearchSteps.${app}: ${rawStep}`);
-			}
-			appSearchSteps[app] = rawStep.trim();
-		}
 
-		return {
-			version: Math.trunc(version),
-			generatedAt,
-			mirrorWindow,
-			contentRegion,
-			points: {
-				homeSearchButton,
-				launchResultTap,
-				appSearchSteps,
-			},
-		};
-	}
+			const appSearchStepsObj = appSearchStepsRaw as Record<string, unknown>;
+			const appSearchSteps: Record<SupportedApp, string> = {
+				chrome: "",
+				instagram: "",
+				tiktok: "",
+			};
+
+			for (const app of SUPPORTED_APPS) {
+				const rawStep = appSearchStepsObj[app];
+				if (typeof rawStep !== "string" || trim(rawStep).length === 0) {
+					die(`Invalid profile.points.appSearchSteps.${app}: expected non-empty string.`);
+				}
+				try {
+					parseTapSteps(rawStep, `profile.points.appSearchSteps.${app}`);
+				} catch {
+					die(`Invalid profile.points.appSearchSteps.${app}: ${rawStep}`);
+				}
+				appSearchSteps[app] = rawStep.trim();
+			}
+
+			const actionTargets = new Set(ACTION_CALIBRATION_DEFINITIONS.map((definition) => definition.id));
+			const appActionPointsRaw = pointsObj.appActionPoints;
+			const appActionPoints: ActionPointsByApp = {};
+			if (appActionPointsRaw !== undefined) {
+				if (typeof appActionPointsRaw !== "object" || appActionPointsRaw === null) {
+					die("Invalid profile.points.appActionPoints: expected app map.");
+				}
+				const appActionPointsObj = appActionPointsRaw as Record<string, unknown>;
+				for (const app of SUPPORTED_APPS) {
+					const rawActionMap = appActionPointsObj[app];
+					if (rawActionMap === undefined || rawActionMap === null) {
+						continue;
+					}
+					if (typeof rawActionMap !== "object") {
+						continue;
+					}
+					const actionMap = rawActionMap as Record<string, unknown>;
+					for (const [action, rawPoint] of Object.entries(actionMap)) {
+						const actionTarget = `${app}:${action}`;
+						if (!actionTargets.has(actionTarget)) {
+							continue;
+						}
+						const parsedPoint = this.validateCalibrationPoint(
+							rawPoint,
+							`profile.points.appActionPoints.${app}.${action}`,
+						);
+						if (!appActionPoints[app]) {
+							appActionPoints[app] = {};
+						}
+						appActionPoints[app]![action] = parsedPoint;
+					}
+				}
+			}
+
+			return {
+				version: Math.trunc(version),
+				generatedAt,
+				mirrorWindow,
+				contentRegion,
+				points: {
+					homeSearchButton,
+					launchResultTap,
+					appSearchSteps,
+					appActionPoints,
+				},
+			};
+		}
 
 	private getCalibrationProfile(): BaseCoordinatesProfile {
 		if (this.calibrationProfile) return this.calibrationProfile;
@@ -563,6 +604,46 @@ export class AutofillAutomation {
 
 		this.calibrationProfile = this.validateCalibrationProfile(parsed);
 		return this.calibrationProfile;
+	}
+
+	private persistCalibrationProfile(profile: BaseCoordinatesProfile): void {
+		mkdirSync(dirname(BASE_COORDINATES_FILE), { recursive: true });
+		writeFileSync(BASE_COORDINATES_FILE, `${JSON.stringify(profile, null, 2)}\n`);
+		this.calibrationProfile = profile;
+	}
+
+	private getExistingAppActionPoints(): ActionPointsByApp | undefined {
+		if (!existsSync(BASE_COORDINATES_FILE)) {
+			return undefined;
+		}
+		try {
+			return this.getCalibrationProfile().points.appActionPoints;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private updateActionPointInProfile(
+		profile: BaseCoordinatesProfile,
+		app: SupportedApp,
+		action: string,
+		point: BaseCoordinatePoint,
+	): BaseCoordinatesProfile {
+		const nextProfile: BaseCoordinatesProfile = {
+			...profile,
+			generatedAt: new Date().toISOString(),
+			points: {
+				...profile.points,
+				appActionPoints: {
+					...(profile.points.appActionPoints ?? {}),
+					[app]: {
+						...(profile.points.appActionPoints?.[app] ?? {}),
+						[action]: point,
+					},
+				},
+			},
+		};
+		return nextProfile;
 	}
 
 	private getFrontmostProcess(): string {
@@ -1181,17 +1262,29 @@ export class AutofillAutomation {
 	}
 
 	private async goHomeBestEffort(): Promise<void> {
+		if (CAPTURE_USE_MIRROR_SHORTCUTS) {
+			logAction("Issuing Command+1 (Mirroring Home)");
+			if (await this.sendHostKeystroke(MIRROR_HOME_SHORTCUT_KEY, "command", "go-home-key-shortcut")) {
+				logAction("Command+1 sent");
+				await sleepAfterAction("home-command", CAPTURE_FAST_STEP_GAP_SEC);
+				return;
+			}
+			logAction("Command+1 failed; falling back to Command+H and swipe");
+		} else {
+			logAction("Skipping mirroring shortcut navigation because CAPTURE_USE_MIRROR_SHORTCUTS=0");
+		}
+
 		logAction("Issuing Command+H");
 		if (await this.sendHostKeystroke("h", "command", "go-home-key")) {
 			logAction("Command+H sent");
-			await sleepAfterAction("home-command");
+			await sleepAfterAction("home-command-legacy", CAPTURE_FAST_STEP_GAP_SEC);
 		} else {
 			logAction("Command+H failed; using swipe fallback");
 		}
-		await sleepAfterAction("home-swipe-prep");
+		await sleepAfterAction("home-swipe-prep", CAPTURE_FAST_STEP_GAP_SEC);
 		await this.dragRel(0.5, 0.96, 0.5, 0.55);
-		await sleepAfterAction("home-swipe-fallback");
-		await sleepAfterAction("home-swipe-finish");
+		await sleepAfterAction("home-swipe-fallback", CAPTURE_FAST_STEP_GAP_SEC);
+		await sleepAfterAction("home-swipe-finish", CAPTURE_FAST_STEP_GAP_SEC);
 	}
 
 	private async openAppFromHome(iconRx: number, iconRy: number): Promise<void> {
@@ -1203,17 +1296,17 @@ export class AutofillAutomation {
 			die("Could not ensure mirror host before app icon tap.");
 		}
 		await this.clickRel(iconRx, iconRy);
-		await sleep(APP_OPEN_DELAY_SEC);
+		await sleepAfterAction("open-app-from-home-legacy", CAPTURE_FAST_STEP_GAP_SEC);
 	}
 
-	private async typeText(text: string): Promise<void> {
+	private async typeText(text: string, charDelaySec = CHAR_DELAY_SEC): Promise<void> {
 		if (!(await this.ensureMirrorFrontmost("type-text"))) {
 			die("Could not ensure mirroring host before typing text.");
 		}
 
 		for (const ch of text) {
 			this.runCliclick(`t:${escapeTapText(ch)}`);
-			await sleep(CHAR_DELAY_SEC);
+			await sleep(charDelaySec);
 		}
 	}
 
@@ -1226,12 +1319,28 @@ export class AutofillAutomation {
 		return steps;
 	}
 
-	private getSearchButtonProfilePoint() : BaseCoordinatePoint {
+	private getSearchButtonProfilePoint(): BaseCoordinatePoint {
 		return this.getCalibrationProfile().points.homeSearchButton;
 	}
 
 	private getLaunchResultProfilePoint(): BaseCoordinatePoint {
 		return this.getCalibrationProfile().points.launchResultTap;
+	}
+
+	private getActionDefinitionForTarget(app: SupportedApp, action: string) {
+		return getActionDefinition(app, action);
+	}
+
+	private getActionPoint(app: SupportedApp, action: string): BaseCoordinatePoint | undefined {
+		const actionPoints = this.getCalibrationProfile().points.appActionPoints;
+		if (!actionPoints) {
+			return undefined;
+		}
+		const appActionPoints = actionPoints[app];
+		if (!appActionPoints) {
+			return undefined;
+		}
+		return appActionPoints[action];
 	}
 
 	private async openAppBySearch(app: SupportedApp): Promise<void> {
@@ -1245,35 +1354,52 @@ export class AutofillAutomation {
 			die("Could not ensure mirror host before search launch.");
 		}
 		logAction(`openAppBySearch(${app}): initial frontmost ok`);
-		await sleepAfterAction("before-go-home");
+		await sleepAfterAction("before-go-home", CAPTURE_FAST_STEP_GAP_SEC);
 		logAction(`openAppBySearch(${app}): entering goHomeBestEffort`);
 		await this.goHomeBestEffort();
 		logAction(`openAppBySearch(${app}): goHomeBestEffort complete`);
-		await sleepAfterAction("post-go-home");
-		await sleepAfterAction("before-search-tap");
+		await sleepAfterAction("post-go-home", CAPTURE_FAST_STEP_GAP_SEC);
+		await sleepAfterAction("before-search-tap", CAPTURE_FAST_STEP_GAP_SEC);
 
-		if (!(await this.ensureMirrorFrontmost("open-app-by-search:search-button"))) {
-			die("Could not ensure mirror host before tapping Search.");
+		let usedSearchShortcut = false;
+		if (CAPTURE_USE_MIRROR_SHORTCUTS) {
+			logAction("Issuing Command+3 (Mirroring Search)");
+			if (await this.sendHostKeystroke(MIRROR_SEARCH_SHORTCUT_KEY, "command", `open-app-by-search:${app}-search-shortcut`)) {
+				logAction("Command+3 sent");
+				usedSearchShortcut = true;
+			} else {
+				logAction("Command+3 failed, using Search icon tap fallback");
+			}
+		} else {
+			logAction("Skipping Mirroring Search shortcut because CAPTURE_USE_MIRROR_SHORTCUTS=0");
 		}
-		logAction(`openAppBySearch(${app}): search-button frontmost ok`);
-		logAction("Tapping Search icon");
-		await this.clickRel(searchPoint.relX, searchPoint.relY);
-		logAction(`openAppBySearch(${app}): search icon tapped`);
-		await sleepAfterAction("search-icon-tap");
-		await sleepAfterAction("search-icon-to-clear");
+
+		if (!usedSearchShortcut) {
+			if (!(await this.ensureMirrorFrontmost("open-app-by-search:search-button"))) {
+				die("Could not ensure mirror host before tapping Search.");
+			}
+			logAction(`openAppBySearch(${app}): search-button frontmost ok`);
+			logAction("Tapping Search icon");
+			await this.clickRel(searchPoint.relX, searchPoint.relY);
+			logAction(`openAppBySearch(${app}): search icon tapped`);
+			await sleepAfterAction("search-icon-tap", CAPTURE_FAST_STEP_GAP_SEC);
+			await sleepAfterAction("search-icon-to-clear", CAPTURE_FAST_STEP_GAP_SEC);
+		} else {
+			await sleepAfterAction("search-shortcut", CAPTURE_FAST_STEP_GAP_SEC);
+		}
+
 		logAction("Clearing Search field");
 		await this.clearField();
-		await sleepAfterAction("search-clear");
+		await sleepAfterAction("search-clear", CAPTURE_FAST_STEP_GAP_SEC);
 		logAction(`Typing app name '${appName}'`);
-		await this.typeText(appName);
-		await sleepAfterAction("search-typing");
-		await sleepAfterAction("typing-to-launch");
+		await this.typeText(appName, CAPTURE_FAST_STEP_GAP_SEC);
+		await sleepAfterAction("search-typing", CAPTURE_FAST_STEP_GAP_SEC);
+		await sleepAfterAction("typing-to-launch", CAPTURE_FAST_STEP_GAP_SEC);
 		logAction("Submitting search with Enter");
 		if (!(await this.sendHostKeystroke("return", "", `open-app-by-search:${app}-submit`))) {
 			die(`Could not submit search for ${app}.`);
 		}
-		await sleepAfterAction("search-submit");
-		await sleep(APP_OPEN_DELAY_SEC);
+		await sleepAfterAction("search-submit", CAPTURE_FAST_STEP_GAP_SEC);
 		logAction(`openAppBySearch(${app}): complete`);
 	}
 
@@ -1289,7 +1415,7 @@ export class AutofillAutomation {
 			logAction(`Search flow failed for ${app}: ${message}`);
 			logAction("Falling back to home icon launch");
 		}
-		await sleepAfterAction("search-fallback-switch");
+		await sleepAfterAction("search-fallback-switch", CAPTURE_FAST_STEP_GAP_SEC);
 
 		switch (app) {
 			case "chrome":
@@ -1358,11 +1484,11 @@ export class AutofillAutomation {
 		const appDir = `${outBase}/${app}`;
 		this.focusMirroring();
 		logAction(`Starting app flow for ${app} (query="${query}", outBase="${outBase}")`);
-		await sleepAfterAction("focus-mirroring-init");
+		await sleepAfterAction("focus-mirroring-init", CAPTURE_FAST_STEP_GAP_SEC);
 		if (!(await this.ensureMirrorFrontmost(`run-app-${app}`))) {
 			die(`Could not return focus to mirror host for ${app} flow.`);
 		}
-		await sleepAfterAction("run-app-frontmost");
+		await sleepAfterAction("run-app-frontmost", CAPTURE_FAST_STEP_GAP_SEC);
 		this.logFrontmostState("run-app:post-focus");
 		this.getCalibrationProfile();
 		const steps = this.getSearchStepsFromProfile(app);
@@ -1371,7 +1497,15 @@ export class AutofillAutomation {
 			case "chrome":
 				logAction(`runAppFlow(${app}): entering chrome flow`);
 				await this.openAppBySearchWithFallback("chrome");
-				await this.tapSequence(steps);
+				const chromeSearchBarPoint = this.getActionPoint("chrome", "searchBar");
+				if (chromeSearchBarPoint) {
+					logAction(`runAppFlow(${app}): using calibrated chrome:searchBar point`);
+					await this.clickRel(chromeSearchBarPoint.relX, chromeSearchBarPoint.relY);
+					await sleepAfterAction("chrome-searchbar-point", CAPTURE_FAST_STEP_GAP_SEC);
+				} else {
+					logAction(`runAppFlow(${app}): no calibrated chrome:searchBar; using fallback search steps`);
+					await this.tapSequence(steps);
+				}
 				await this.clearField();
 				await this.typeAndCapturePerChar("chrome", query, appDir, querySlug);
 				break;
@@ -1410,6 +1544,7 @@ export class AutofillAutomation {
 		const mirrorWindowBounds = this.getMirrorWindowBounds();
 		const mirrorWindow = parseBoundsTuple(mirrorWindowBounds);
 		const contentRegion = this.getContentRegion(mirrorWindowBounds);
+		const existingAppActionPoints = this.getExistingAppActionPoints();
 		console.log(
 			`Using content region: x=${contentRegion.x} y=${contentRegion.y} w=${contentRegion.width} h=${contentRegion.height}`,
 		);
@@ -1428,15 +1563,40 @@ export class AutofillAutomation {
 					instagram: INSTAGRAM_SEARCH_STEPS,
 					tiktok: TIKTOK_SEARCH_STEPS,
 				},
+				appActionPoints: existingAppActionPoints,
 			},
 		};
 
 		mkdirSync("./calibration", { recursive: true });
 		this.screenshotContent("./calibration/iphone_content.png");
-		writeFileSync(BASE_COORDINATES_FILE, `${JSON.stringify(baseCoordinatesProfile, null, 2)}\n`);
+		this.persistCalibrationProfile(baseCoordinatesProfile);
 		console.log("Wrote ./calibration/iphone_content.png");
 		console.log("Wrote ./calibration/base-coordinates.json");
-		this.calibrationProfile = baseCoordinatesProfile;
+	}
+
+	public async calibrateAction(app: SupportedApp, action: string): Promise<void> {
+		this.ensurePreflightChecks();
+		const definition = this.getActionDefinitionForTarget(app, action);
+		if (!definition) {
+			die(`Unsupported calibration action '${app}:${action}'.`);
+		}
+
+		const profile = this.getCalibrationProfile();
+		this.focusMirroring();
+		const mirrorWindowBounds = this.getMirrorWindowBounds();
+		const contentRegion = this.getContentRegion(mirrorWindowBounds);
+		console.log(`Calibrating action point '${definition.label}' (${definition.id}).`);
+		console.log("Move your mouse over the target point and press Enter to capture it.");
+
+		const capturedPoint = await this.captureHomeSearchFromMouse(contentRegion);
+		const updatedProfile = this.updateActionPointInProfile(profile, app, action, capturedPoint);
+		this.persistCalibrationProfile(updatedProfile);
+
+		console.log(`Updated ${BASE_COORDINATES_FILE} with ${definition.id}.`);
+		console.log(`  rel=${capturedPoint.relX.toFixed(6)},${capturedPoint.relY.toFixed(6)}`);
+		if (capturedPoint.absX !== undefined && capturedPoint.absY !== undefined) {
+			console.log(`  abs=${capturedPoint.absX},${capturedPoint.absY}`);
+		}
 	}
 
 	public coordToRelMode(x: number, y: number): void {
@@ -1481,6 +1641,8 @@ export class AutofillAutomation {
 		const querySlug = sanitizeQueryForFilename(query);
 		console.log(`[${LOG_PREFIX}] Effective CAPTURE_PRE_ACTION_DELAY_SEC=${CAPTURE_PRE_ACTION_DELAY_SEC}`);
 		console.log(`[${LOG_PREFIX}] Effective CAPTURE_STEP_GAP_SEC=${CAPTURE_STEP_GAP_SEC}`);
+		console.log(`[${LOG_PREFIX}] Effective CAPTURE_FAST_STEP_GAP_SEC=${CAPTURE_FAST_STEP_GAP_SEC}`);
+		console.log(`[${LOG_PREFIX}] Effective CAPTURE_USE_MIRROR_SHORTCUTS=${CAPTURE_USE_MIRROR_SHORTCUTS}`);
 
 		if (CAPTURE_PRE_ACTION_DELAY_SEC > 0) {
 			console.log(`Starting capture: waiting ${CAPTURE_PRE_ACTION_DELAY_SEC}s for mirroring/host to settle before actions...`);

@@ -1,5 +1,5 @@
 export type SupportedApp = "chrome" | "instagram" | "tiktok";
-export type AppFlowMode = "capture" | "print-window" | "calibrate" | "coord-to-rel" | "point-check";
+export type AppFlowMode = "capture" | "print-window" | "calibrate" | "calibrate-action" | "coord-to-rel" | "point-check";
 
 export interface CliConfig {
 	query?: string;
@@ -7,6 +7,7 @@ export interface CliConfig {
 	out?: string;
 	printWindow?: boolean;
 	calibrate?: boolean;
+	calibrateAction?: string;
 	coordToRel?: [number, number];
 	pointCheck?: [number, number];
 }
@@ -32,22 +33,36 @@ export interface BaseCoordinatePoint {
 	absY?: number;
 }
 
+export type ActionPointByAppName = Partial<Record<string, BaseCoordinatePoint>>;
+export type ActionPointsByApp = Partial<Record<SupportedApp, ActionPointByAppName>>;
+
 export interface BaseCoordinatesProfile {
 	version: number;
 	generatedAt: string;
 	mirrorWindow: WindowBounds;
 	contentRegion: Region;
+
 	points: {
 		homeSearchButton: BaseCoordinatePoint;
 		launchResultTap: BaseCoordinatePoint;
 		appSearchSteps: Record<SupportedApp, string>;
+		appActionPoints?: ActionPointsByApp;
 	};
+}
+
+export interface ActionCalibrationDefinition {
+	id: string;
+	label: string;
+	forApp: SupportedApp;
+	fallbackTapSteps?: string;
 }
 
 export const LOG_PREFIX = "iphone-mirror-autofill";
 
 export const MIRROR_APP_NAME = "iPhone Mirroring";
 export const MIRROR_APP_FALLBACK = "QuickTime Player";
+export const MIRROR_HOME_SHORTCUT_KEY = "1";
+export const MIRROR_SEARCH_SHORTCUT_KEY = "3";
 
 export const INSET_LEFT = 10;
 export const INSET_TOP = 48;
@@ -87,6 +102,63 @@ export const TIKTOK_ICON_RY = 0.78;
 export const CHROME_SEARCH_STEPS = "0.50,0.10";
 export const INSTAGRAM_SEARCH_STEPS = "0.20,0.95;0.50,0.12";
 export const TIKTOK_SEARCH_STEPS = "0.92,0.08;0.50,0.12";
+
+export const ACTION_CALIBRATION_DEFINITIONS: ReadonlyArray<ActionCalibrationDefinition> = [
+	{
+		id: "chrome:searchBar",
+		label: "Chrome search bar",
+		forApp: "chrome",
+		fallbackTapSteps: CHROME_SEARCH_STEPS,
+	},
+];
+
+export function isSupportedActionTarget(value: string): value is `${SupportedApp}:${string}` {
+	if (!value.includes(":")) {
+		return false;
+	}
+	const [rawApp, rawAction] = value.split(":");
+	if (!rawApp || !rawAction) {
+		return false;
+	}
+	const app = trim(rawApp).toLowerCase();
+	if (app !== "chrome" && app !== "instagram" && app !== "tiktok") {
+		return false;
+	}
+	return ACTION_CALIBRATION_DEFINITIONS.some((definition) => definition.id === `${app}:${trim(rawAction)}`);
+}
+
+export function parseActionTarget(rawValue: string): { app: SupportedApp; action: string } {
+	const normalized = trim(rawValue);
+	if (!normalized.length) {
+		die("Invalid --calibrate-action value: expected app:action");
+	}
+
+	const parts = normalized.split(":");
+	if (parts.length !== 2) {
+		die("Invalid --calibrate-action format. Expected app:action, for example chrome:searchBar.");
+	}
+
+	const rawApp = trim(parts[0] ?? "");
+	const rawAction = trim(parts[1] ?? "");
+	if (!rawApp || !rawAction) {
+		die("Invalid --calibrate-action format. Expected app:action, for example chrome:searchBar.");
+	}
+
+	if (!isSupportedActionTarget(`${rawApp.toLowerCase()}:${rawAction}`)) {
+		die(`Unknown action '${rawApp.toLowerCase()}:${rawAction}'. Supported actions: ${ACTION_CALIBRATION_DEFINITIONS.map((definition) => definition.id).join(", ")}`);
+	}
+
+	return { app: rawApp.toLowerCase() as SupportedApp, action: rawAction };
+}
+
+export function getActionDefinition(app: SupportedApp, action: string): ActionCalibrationDefinition | undefined {
+	const target = `${app}:${action}`;
+	return ACTION_CALIBRATION_DEFINITIONS.find((definition) => definition.id === target);
+}
+
+export function getActionTargetsForApp(app: SupportedApp): ActionCalibrationDefinition[] {
+	return ACTION_CALIBRATION_DEFINITIONS.filter((definition) => definition.forApp === app);
+}
 
 export const CLEAR_MODE = "select_all";
 export const BACKSPACE_COUNT = 40;
@@ -131,6 +203,47 @@ export const CAPTURE_STEP_GAP_SEC = (() => {
 		console.error(`[${LOG_PREFIX}] Invalid CAPTURE_STEP_GAP_SEC='${raw}', using default ${defaultDelay}s.`);
 	}
 	return defaultDelay;
+})();
+
+export const CAPTURE_FAST_STEP_GAP_SEC = (() => {
+	const raw = process.env.CAPTURE_FAST_STEP_GAP_SEC;
+	const defaultDelay = 0.7;
+	if (raw === undefined || raw.length === 0) {
+		return defaultDelay;
+	}
+	const parsed = Number(raw);
+	if (Number.isFinite(parsed) && parsed >= 0) {
+		return parsed;
+	}
+	if (PRINT_WINDOW_DEBUG) {
+		console.error(`[${LOG_PREFIX}] Invalid CAPTURE_FAST_STEP_GAP_SEC='${raw}', using default ${defaultDelay}s.`);
+	}
+	return defaultDelay;
+})();
+
+export const CAPTURE_USE_MIRROR_SHORTCUTS = (() => {
+	const raw = process.env.CAPTURE_USE_MIRROR_SHORTCUTS;
+	if (raw === undefined || raw.length === 0) {
+		return true;
+	}
+	const lowered = raw.toLowerCase();
+	if (raw.length === 1 && (raw === "1" || raw === "0")) {
+		return raw === "1";
+	}
+	if (["true", "yes", "on", "enabled"].includes(lowered)) {
+		return true;
+	}
+	if (["false", "no", "off", "disabled", "0"].includes(lowered)) {
+		return false;
+	}
+	const parsed = Number(raw);
+	if (Number.isFinite(parsed) && parsed !== 0) {
+		return true;
+	}
+	if (PRINT_WINDOW_DEBUG) {
+		console.error(`[${LOG_PREFIX}] Invalid CAPTURE_USE_MIRROR_SHORTCUTS='${raw}', using default true.`);
+	}
+	return true;
 })();
 
 export const RELATIVE_TOKEN_RE = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|[0-9]*\.[0-9]+)$/;
@@ -210,17 +323,18 @@ export function formatUsage(): string {
 	return `Usage:
   bun run capture -- --query "pizza" --apps chrome,instagram,tiktok [--out ./outdir]
 
-Modes:
-  --query "text"         Required search text to type one character at a time
-  --apps "a,b,c"         Required app list (chrome,instagram,tiktok) any subset
-  --out path             Optional output folder (defaults to ./autofill_shots_YYYYmmdd_HHMMSS)
+	Modes:
+	  --query "text"         Required search text to type one character at a time
+	  --apps "a,b,c"         Required app list (chrome,instagram,tiktok) any subset
+	  --out path             Optional output folder (defaults to ./autofill_shots_YYYYmmdd_HHMMSS)
 
-Utility:
-  --print-window         Print iPhone mirroring window bounds and computed content bounds
-  --calibrate            Interactive calibrate: capture Search button coordinate from mouse and write calibration/base-coordinates.json
-  --coord-to-rel X Y     Convert absolute screen coordinates to relative (0..1)
-  --point-check RX RY     Validate relative-to-absolute conversion for debug
-  -h, --help             Print this help text
+	Utility:
+	  --print-window         Print iPhone mirroring window bounds and computed content bounds
+	  --calibrate            Interactive calibrate: capture Search button coordinate from mouse and write calibration/base-coordinates.json
+	  --calibrate-action KEY  Calibrate an app action coordinate. Key format: app:action (for now: chrome:searchBar)
+	  --coord-to-rel X Y     Convert absolute screen coordinates to relative (0..1)
+	  --point-check RX RY     Validate relative-to-absolute conversion for debug
+	  -h, --help             Print this help text
 
 Requirements:
   - macOS

@@ -63,6 +63,12 @@ print-window:
 calibrate:
   @{{SCRIPT}} -- --calibrate
 
+calibrate-action app action:
+  @{{SCRIPT}} -- --calibrate-action "{{app}}:{{action}}"
+
+calibrate-chrome-search-bar:
+  @{{SCRIPT}} -- --calibrate-action "chrome:searchBar"
+
 coord-to-rel x y:
   @{{SCRIPT}} -- --coord-to-rel "{{x}}" "{{y}}"
 

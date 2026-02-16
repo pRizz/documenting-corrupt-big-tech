@@ -37,6 +37,7 @@ bun run capture -- --coord-to-rel 100 100
 bun run capture -- --point-check 0.5 0.1
 bun run capture -- --query "a" --apps chrome
 bun run capture -- --calibrate
+bun run capture -- --calibrate-action chrome:searchBar
 bun run preflight
 bun run check-mirror
 bun run sanity-capture -- --query "a"
@@ -54,10 +55,19 @@ Capture flow now includes a stabilization pause before app actions:
   - useful to avoid UI race conditions and stabilize iPhone mirroring interactions
   - set to `0.75` or higher on slower machines
   - set to `0` to keep current fast burst mode
-
+- `CAPTURE_FAST_STEP_GAP_SEC` (default: `0.7`)
+  - used by the launch path up to app-open completion (home/search entry, search submit, and search-fallback transition)
+  - recommended default keeps validated pre-open steps responsive while preserving stability
+  - set higher or lower if your mirror timing needs it
+- `CAPTURE_USE_MIRROR_SHORTCUTS` (default: `1`)
+  - set to `1`/`true` (default) to use iPhone Mirroring shortcuts
+  - set to `0`/`false` to force legacy navigation (`Command+H` + swipe and Search icon tap)
 ```bash
 CAPTURE_PRE_ACTION_DELAY_SEC=5 bun run capture -- --query "a" --apps chrome
 CAPTURE_PRE_ACTION_DELAY_SEC=5 CAPTURE_STEP_GAP_SEC=0.75 bun run capture -- --query "a" --apps chrome
+CAPTURE_FAST_STEP_GAP_SEC=0.45 bun run capture -- --query "a" --apps chrome
+CAPTURE_PRE_ACTION_DELAY_SEC=4 CAPTURE_STEP_GAP_SEC=4 CAPTURE_FAST_STEP_GAP_SEC=0.7 bun run capture -- --query "a" --apps chrome
+CAPTURE_USE_MIRROR_SHORTCUTS=0 bun run capture -- --query "a" --apps chrome
 ```
 
 AppleScript/probe logging is intentionally quiet by default. Enable detailed logs with:
@@ -68,10 +78,11 @@ PRINT_WINDOW_DEBUG=1 bun run capture -- --query "a" --apps chrome
 
 ### Search launch flow and base coordinates
 
-The Bun runtime now opens apps by tapping the iPhone home **Search** button first:
+The Bun runtime now prefers iPhone Mirroring shortcuts, with legacy fallback:
 
-1. Return to Home
-2. Tap Search button
+1. Return to Home (Command+1)
+2. Open Search UI (Command+3)  
+   - if this fails, fallback to tapping the calibrated Search icon
 3. Clear search field and type app name (`Chrome`, `Instagram`, `TikTok`)
 4. Submit the search with Enter so the first search result is selected
 5. Continue with in-app search steps
@@ -113,6 +124,42 @@ bun run capture -- --calibrate
 
 The legacy icon-based app launch remains available internally as a fallback only.
 
+### Action calibration framework
+
+You can calibrate additional in-app action points and persist them in `calibration/base-coordinates.json` without changing behavior for every run.
+
+Supported action IDs:
+
+- `chrome:searchBar`
+
+For a new action:
+
+1. Ensure the baseline file exists (`bun run capture -- --calibrate`).
+2. Run:
+
+```bash
+bun run capture -- --calibrate-action chrome:searchBar
+```
+
+3. Move your mouse over the target point and press Enter when ready.
+4. The selected point is stored under:
+
+- `points.appActionPoints.chrome.searchBar`
+
+During capture, if `chrome:searchBar` is available, the Chrome flow uses that point before falling back to `appSearchSteps`.
+
+Precedence:
+
+1. calibrated action point (highest)
+2. legacy step sequence from `appSearchSteps` (fallback)
+
+Convenience targets:
+
+```bash
+just calibrate-action app=chrome action=searchBar
+just calibrate-chrome-search-bar
+```
+
 ### Convenience commands (Justfile)
 
 ```bash
@@ -123,6 +170,9 @@ just capture-tiktok query="pizza"
 just preflight
 just check-mirror
 just check-mirror debug=1
+just calibrate
+just calibrate-action app=chrome action=searchBar
+just calibrate-chrome-search-bar
 just sanity-capture query="a"
 just print-window
 ```
