@@ -8,6 +8,7 @@ import {
 	APP_LAUNCH_RESULT_RY,
 	CALIBRATION_PREVIEW_INTERVAL_MS,
 	CAPTURE_PRE_ACTION_DELAY_SEC,
+	CAPTURE_STEP_GAP_SEC,
 	APP_OPEN_DELAY_SEC,
 	BACKSPACE_COUNT,
 	BASE_COORDINATES_FILE,
@@ -74,6 +75,12 @@ type CalibrationTelemetryPanelState = {
 
 function logAction(message: string): void {
 	console.log(`[${LOG_PREFIX}] ${message}`);
+}
+
+async function sleepAfterAction(label: string, delaySec = CAPTURE_STEP_GAP_SEC): Promise<void> {
+	if (delaySec <= 0) return;
+	logAction(`Waiting ${delaySec}s after ${label}...`);
+	await sleep(delaySec);
 }
 
 function asCommandResult(command: string, args: string[]): { exitCode: number; output: string } {
@@ -1161,11 +1168,13 @@ export class AutofillAutomation {
 		logAction("Issuing Command+H");
 		if (await this.sendHostKeystroke("h", "command", "go-home-key")) {
 			logAction("Command+H sent");
+			await sleepAfterAction("home-command");
 		} else {
 			logAction("Command+H failed; using swipe fallback");
 		}
 		await sleep(0.4);
 		await this.dragRel(0.5, 0.96, 0.5, 0.55);
+		await sleepAfterAction("home-swipe-fallback");
 		await sleep(0.4);
 	}
 
@@ -1219,20 +1228,25 @@ export class AutofillAutomation {
 			die("Could not ensure mirror host before search launch.");
 		}
 		await this.goHomeBestEffort();
+		await sleepAfterAction("post-go-home");
 
 		if (!(await this.ensureMirrorFrontmost("open-app-by-search:search-button"))) {
 			die("Could not ensure mirror host before tapping Search.");
 		}
 		logAction("Tapping Search icon");
 		await this.clickRel(searchPoint.relX, searchPoint.relY);
+		await sleepAfterAction("search-icon-tap");
 		await sleep(0.3);
 		logAction("Clearing Search field");
 		await this.clearField();
+		await sleepAfterAction("search-clear");
 		logAction(`Typing app name '${appName}'`);
 		await this.typeText(appName);
+		await sleepAfterAction("search-typing");
 		await sleep(0.35);
 		logAction("Tapping launch result");
 		await this.clickRel(launchPoint.relX, launchPoint.relY);
+		await sleepAfterAction("launch-result-tap");
 		await sleep(APP_OPEN_DELAY_SEC);
 	}
 
@@ -1315,9 +1329,11 @@ export class AutofillAutomation {
 		this.focusMirroring();
 		logAction(`Starting app flow for ${app} (query="${query}", outBase="${outBase}")`);
 		await sleep(0.2);
+		await sleepAfterAction("focus-mirroring");
 		if (!(await this.ensureMirrorFrontmost(`run-app-${app}`))) {
 			die(`Could not return focus to mirror host for ${app} flow.`);
 		}
+		await sleepAfterAction("run-app-frontmost");
 		this.logFrontmostState("run-app:post-focus");
 		this.getCalibrationProfile();
 		const steps = this.getSearchStepsFromProfile(app);

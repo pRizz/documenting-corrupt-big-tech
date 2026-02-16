@@ -49,9 +49,15 @@ Capture flow now includes a stabilization pause before app actions:
 - `CAPTURE_PRE_ACTION_DELAY_SEC` (default: `4`)
   - set to `3`/`4`/`5` to tune for your machine
   - set to `0` to disable the wait
+- `CAPTURE_STEP_GAP_SEC` (default: `0.45`)
+  - adds a short delay between major scripted actions (tap/key/type transitions)
+  - useful to avoid UI race conditions and stabilize iPhone mirroring interactions
+  - set to `0.75` or higher on slower machines
+  - set to `0` to keep current fast burst mode
 
 ```bash
 CAPTURE_PRE_ACTION_DELAY_SEC=5 bun run capture -- --query "a" --apps chrome
+CAPTURE_PRE_ACTION_DELAY_SEC=5 CAPTURE_STEP_GAP_SEC=0.75 bun run capture -- --query "a" --apps chrome
 ```
 
 AppleScript/probe logging is intentionally quiet by default. Enable detailed logs with:

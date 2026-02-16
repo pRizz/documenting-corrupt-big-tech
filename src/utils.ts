@@ -117,6 +117,22 @@ export const CAPTURE_PRE_ACTION_DELAY_SEC = (() => {
 	return defaultDelay;
 })();
 
+export const CAPTURE_STEP_GAP_SEC = (() => {
+	const raw = process.env.CAPTURE_STEP_GAP_SEC;
+	const defaultDelay = 0.45;
+	if (raw === undefined || raw.length === 0) {
+		return defaultDelay;
+	}
+	const parsed = Number(raw);
+	if (Number.isFinite(parsed) && parsed >= 0) {
+		return parsed;
+	}
+	if (PRINT_WINDOW_DEBUG) {
+		console.error(`[${LOG_PREFIX}] Invalid CAPTURE_STEP_GAP_SEC='${raw}', using default ${defaultDelay}s.`);
+	}
+	return defaultDelay;
+})();
+
 export const RELATIVE_TOKEN_RE = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|[0-9]*\.[0-9]+)$/;
 
 export class CliError extends Error {
