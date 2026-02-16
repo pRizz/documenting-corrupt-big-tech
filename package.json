@@ -6,6 +6,7 @@
   "scripts": {
     "typecheck": "bunx tsc --noEmit",
     "typecheck:watch": "bunx tsc --noEmit --watch",
+    "pre-commit": "bun run typecheck && bun run preflight",
     "capture": "bun run src/cli.ts",
     "capture:all": "bun run capture -- --apps chrome,instagram,tiktok",
     "capture:chrome": "bun run capture -- --apps chrome",

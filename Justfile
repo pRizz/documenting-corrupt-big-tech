@@ -36,6 +36,9 @@ capture-tiktok query out="":
 preflight:
   @bun run preflight
 
+pre-commit:
+  @bun run pre-commit
+
 check-mirror debug="0":
   @if [ "{{debug}}" = "1" ]; then \
     PRINT_WINDOW_DEBUG=1 {{SCRIPT}} -- --print-window; \

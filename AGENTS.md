@@ -14,6 +14,20 @@ Default to using Bun instead of Node.js.
 - Use `bunx <package> <command>` instead of `npx <package> <command>`
 - Bun automatically loads .env, so don't use dotenv.
 
+## Pre-commit
+
+Before committing, run:
+
+```sh
+bun run pre-commit
+```
+
+or
+
+```sh
+just pre-commit
+```
+
 ## APIs
 
 - `Bun.serve()` supports WebSockets, HTTPS, and routes. Don't use `express`.
