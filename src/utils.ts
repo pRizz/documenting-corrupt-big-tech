@@ -25,6 +25,25 @@ export interface Region {
 	height: number;
 }
 
+export interface BaseCoordinatePoint {
+	relX: number;
+	relY: number;
+	absX?: number;
+	absY?: number;
+}
+
+export interface BaseCoordinatesProfile {
+	version: number;
+	generatedAt: string;
+	mirrorWindow: WindowBounds;
+	contentRegion: Region;
+	points: {
+		homeSearchButton: BaseCoordinatePoint;
+		launchResultTap: BaseCoordinatePoint;
+		appSearchSteps: Record<SupportedApp, string>;
+	};
+}
+
 export const LOG_PREFIX = "iphone-mirror-autofill";
 
 export const MIRROR_APP_NAME = "iPhone Mirroring";
@@ -39,6 +58,19 @@ export const COORD_SCALE = 1;
 
 export const CHAR_DELAY_SEC = 0.25;
 export const APP_OPEN_DELAY_SEC = 1.0;
+
+export const BASE_COORDINATES_FILE = "./calibration/base-coordinates.json";
+
+export const APP_LAUNCH_QUERY: Readonly<Record<SupportedApp, string>> = {
+	chrome: "Chrome",
+	instagram: "Instagram",
+	tiktok: "TikTok",
+};
+
+export const APP_HOME_SEARCH_RX = 0.5;
+export const APP_HOME_SEARCH_RY = 0.91;
+export const APP_LAUNCH_RESULT_RX = 0.5;
+export const APP_LAUNCH_RESULT_RY = 0.63;
 
 export const CHROME_ICON_RX = 0.18;
 export const CHROME_ICON_RY = 0.78;
@@ -148,7 +180,7 @@ Modes:
 
 Utility:
   --print-window         Print iPhone mirroring window bounds and computed content bounds
-  --calibrate            Capture a crop preview of the current phone content region
+  --calibrate            Capture a crop preview and write calibration/base-coordinates.json
   --coord-to-rel X Y     Convert absolute screen coordinates to relative (0..1)
   --point-check RX RY     Validate relative-to-absolute conversion for debug
   -h, --help             Print this help text

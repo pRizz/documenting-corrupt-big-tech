@@ -33,14 +33,41 @@ bun run capture -- --query "pizza" --apps chrome,instagram,tiktok --out ./outdir
 
 ```bash
 bun run capture -- --print-window
-bun run capture -- --calibrate
 bun run capture -- --coord-to-rel 100 100
 bun run capture -- --point-check 0.5 0.1
 bun run capture -- --query "a" --apps chrome
+bun run capture -- --calibrate
 bun run preflight
 bun run check-mirror
 bun run sanity-capture -- --query "a"
 ```
+
+### Search launch flow and base coordinates
+
+The Bun runtime now opens apps by tapping the iPhone home **Search** button first:
+
+1. Return to Home
+2. Tap Search button
+3. Clear search field and type app name (`Chrome`, `Instagram`, `TikTok`)
+4. Tap the launch result entry
+5. Continue with in-app search steps
+
+This behavior is controlled by:
+
+- `calibration/base-coordinates.json`
+
+If calibration data is missing or invalid, capture mode exits with explicit guidance to rerun:
+
+```bash
+bun run capture -- --calibrate
+```
+
+`bun run capture -- --calibrate` now writes:
+
+- `calibration/iphone_content.png`
+- `calibration/base-coordinates.json`
+
+The legacy icon-based app launch remains available internally as a fallback only.
 
 ### Convenience commands (Justfile)
 
@@ -77,7 +104,7 @@ just print-window
 
 ### Notes
 
-- App icon positions and search-entry taps are hard-coded for one layout and intended to be calibrated.
+- App icon positions and search-entry taps are still present as legacy fallback and are reflected in `src/utils.ts` defaults.
 - Use `bun run capture -- --print-window` or `bun run capture -- --calibrate` to validate the cropped content area.
 - If automation fails, rerun after adjusting coordinates and delays.
 - If you see connection errors in an embedded terminal, run the command from macOS Terminal.app after enabling `Accessibility` and `Automation` for Terminal and `System Events`.

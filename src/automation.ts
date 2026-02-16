@@ -1,9 +1,15 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
 import {
+	APP_HOME_SEARCH_RX,
+	APP_HOME_SEARCH_RY,
+	APP_LAUNCH_QUERY,
+	APP_LAUNCH_RESULT_RX,
+	APP_LAUNCH_RESULT_RY,
 	APP_OPEN_DELAY_SEC,
 	BACKSPACE_COUNT,
+	BASE_COORDINATES_FILE,
 	CHROME_ICON_RX,
 	CHROME_ICON_RY,
 	CHROME_SEARCH_STEPS,
@@ -24,6 +30,8 @@ import {
 	TIKTOK_ICON_RX,
 	TIKTOK_ICON_RY,
 	TIKTOK_SEARCH_STEPS,
+	type BaseCoordinatePoint,
+	type BaseCoordinatesProfile,
 	RELATIVE_TOKEN_RE,
 	sleep,
 	trim,
@@ -100,11 +108,194 @@ function validateRelativeToken(label: string, value: string): number {
 	return parsed;
 }
 
+function parseTapSteps(raw: string, label = "tap sequence"): [number, number][] {
+	const steps = raw
+		.split(";")
+		.map(trim)
+		.filter((entry) => entry.length > 0);
+	if (steps.length === 0) {
+		die(`Invalid ${label}: no steps.`);
+	}
+
+	const parsed: [number, number][] = [];
+	for (const step of steps) {
+		const tokens = step.split(",");
+		if (tokens.length !== 2) {
+			die(`Invalid ${label} step '${step}'. Expected 'x,y'.`);
+		}
+		const [rawX, rawY] = tokens;
+		if (rawX === undefined || rawY === undefined) {
+			die(`Invalid ${label} step '${step}'. Expected 'x,y'.`);
+		}
+		parsed.push([validateRelativeToken(`${label} x`, rawX), validateRelativeToken(`${label} y`, rawY)]);
+	}
+
+	return parsed;
+}
+
 function escapeTapText(value: string): string {
 	return value.replace(/\\/g, "\\\\").replace(/,/g, "\\,").replace(/:/g, "\\:");
 }
 
 export class AutofillAutomation {
+	private calibrationProfile?: BaseCoordinatesProfile;
+
+	private static createFallbackCalibrationErrorMessage(): string {
+		return [
+			`Missing or invalid base-coordinate calibration file: ${BASE_COORDINATES_FILE}.`,
+			"Run: bun run capture -- --calibrate",
+			"Then rerun your capture command.",
+		].join(" ");
+	}
+
+	private clamp01(value: number): number {
+		if (!Number.isFinite(value)) {
+			return Number.NaN;
+		}
+		return Math.max(0, Math.min(1, value));
+	}
+
+	private clamp01Checked(value: number, label: string): number {
+		if (!Number.isFinite(value)) {
+			die(`Invalid relative value in ${label}: ${value}`);
+		}
+		return this.clamp01(value);
+	}
+
+	private validateCalibrationValue(value: unknown, label: string): number {
+		if (typeof value !== "number" || !Number.isFinite(value)) {
+			die(`Invalid ${label}: expected finite number.`);
+		}
+		return value;
+	}
+
+	private validateCalibrationPoint(value: unknown, label: string): BaseCoordinatePoint {
+		if (typeof value !== "object" || value === null) {
+			die(`Invalid ${label}: expected object.`);
+		}
+		const typed = value as Record<string, unknown>;
+		const relX = this.validateCalibrationValue(typed.relX, `${label}.relX`);
+		const relY = this.validateCalibrationValue(typed.relY, `${label}.relY`);
+		const absX = typed.absX === undefined ? undefined : this.validateCalibrationValue(typed.absX, `${label}.absX`);
+		const absY = typed.absY === undefined ? undefined : this.validateCalibrationValue(typed.absY, `${label}.absY`);
+		return { relX: this.clamp01Checked(relX, `${label}.relX`), relY: this.clamp01Checked(relY, `${label}.relY`), absX, absY };
+	}
+
+	private validateCalibrationProfile(rawProfile: unknown): BaseCoordinatesProfile {
+		if (typeof rawProfile !== "object" || rawProfile === null) {
+			die(AutofillAutomation.createFallbackCalibrationErrorMessage());
+		}
+		const profile = rawProfile as Record<string, unknown>;
+
+		const version = this.validateCalibrationValue(profile.version, "profile.version");
+		if (!Number.isInteger(version) || version < 1) {
+			die("Unsupported or invalid base-coordinate profile version.");
+		}
+		const generatedAt = typeof profile.generatedAt === "string" ? profile.generatedAt : "";
+		if (generatedAt.length === 0) {
+			die("Invalid profile.generatedAt: expected non-empty string.");
+		}
+
+		const mirrorWindowRaw = profile.mirrorWindow;
+		if (typeof mirrorWindowRaw !== "object" || mirrorWindowRaw === null) {
+			die("Invalid profile.mirrorWindow: expected bounds object.");
+		}
+		const mirrorWindowObj = mirrorWindowRaw as Record<string, unknown>;
+		const mirrorWindow: WindowBounds = {
+			x1: this.validateCalibrationValue(mirrorWindowObj.x1, "profile.mirrorWindow.x1"),
+			y1: this.validateCalibrationValue(mirrorWindowObj.y1, "profile.mirrorWindow.y1"),
+			x2: this.validateCalibrationValue(mirrorWindowObj.x2, "profile.mirrorWindow.x2"),
+			y2: this.validateCalibrationValue(mirrorWindowObj.y2, "profile.mirrorWindow.y2"),
+		};
+		if (mirrorWindow.x2 <= mirrorWindow.x1 || mirrorWindow.y2 <= mirrorWindow.y1) {
+			die("Invalid profile.mirrorWindow: empty or inverted bounds.");
+		}
+
+		const contentRegionRaw = profile.contentRegion;
+		if (typeof contentRegionRaw !== "object" || contentRegionRaw === null) {
+			die("Invalid profile.contentRegion: expected region object.");
+		}
+		const contentRegionObj = contentRegionRaw as Record<string, unknown>;
+		const contentRegion: Region = {
+			x: this.validateCalibrationValue(contentRegionObj.x, "profile.contentRegion.x"),
+			y: this.validateCalibrationValue(contentRegionObj.y, "profile.contentRegion.y"),
+			width: this.validateCalibrationValue(contentRegionObj.width, "profile.contentRegion.width"),
+			height: this.validateCalibrationValue(contentRegionObj.height, "profile.contentRegion.height"),
+		};
+		if (contentRegion.width <= 0 || contentRegion.height <= 0) {
+			die("Invalid profile.contentRegion: width/height must be greater than zero.");
+		}
+
+		const pointsRaw = profile.points;
+		if (typeof pointsRaw !== "object" || pointsRaw === null) {
+			die("Invalid profile.points: expected object.");
+		}
+		const pointsObj = pointsRaw as Record<string, unknown>;
+		const homeSearchButton = this.validateCalibrationPoint(pointsObj.homeSearchButton, "profile.points.homeSearchButton");
+		const launchResultTap = this.validateCalibrationPoint(pointsObj.launchResultTap, "profile.points.launchResultTap");
+
+		const appSearchStepsRaw = pointsObj.appSearchSteps;
+		if (typeof appSearchStepsRaw !== "object" || appSearchStepsRaw === null) {
+			die("Invalid profile.points.appSearchSteps: expected map of app names to tap sequences.");
+		}
+
+		const appSearchStepsObj = appSearchStepsRaw as Record<string, unknown>;
+		const appSearchSteps: Record<SupportedApp, string> = {
+			chrome: "",
+			instagram: "",
+			tiktok: "",
+		};
+
+		for (const app of SUPPORTED_APPS) {
+			const rawStep = appSearchStepsObj[app];
+			if (typeof rawStep !== "string" || trim(rawStep).length === 0) {
+				die(`Invalid profile.points.appSearchSteps.${app}: expected non-empty string.`);
+			}
+			try {
+				parseTapSteps(rawStep, `profile.points.appSearchSteps.${app}`);
+			} catch {
+				die(`Invalid profile.points.appSearchSteps.${app}: ${rawStep}`);
+			}
+			appSearchSteps[app] = rawStep.trim();
+		}
+
+		return {
+			version: Math.trunc(version),
+			generatedAt,
+			mirrorWindow,
+			contentRegion,
+			points: {
+				homeSearchButton,
+				launchResultTap,
+				appSearchSteps,
+			},
+		};
+	}
+
+	private getCalibrationProfile(): BaseCoordinatesProfile {
+		if (this.calibrationProfile) return this.calibrationProfile;
+		if (!existsSync(BASE_COORDINATES_FILE)) {
+			die(AutofillAutomation.createFallbackCalibrationErrorMessage());
+		}
+
+		let raw: string;
+		try {
+			raw = readFileSync(BASE_COORDINATES_FILE, "utf8");
+		} catch {
+			die(AutofillAutomation.createFallbackCalibrationErrorMessage());
+		}
+
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(raw);
+		} catch {
+			die(AutofillAutomation.createFallbackCalibrationErrorMessage());
+		}
+
+		this.calibrationProfile = this.validateCalibrationProfile(parsed);
+		return this.calibrationProfile;
+	}
+
 	private getFrontmostProcess(): string {
 		const script = `
 	tell application "System Events"
@@ -581,6 +772,22 @@ export class AutofillAutomation {
 		return [absX, absY];
 	}
 
+	private relToAbsWithRegion(rx: number, ry: number, region: Region): [number, number] {
+		const x = region.x + region.width * rx;
+		const y = region.y + region.height * ry;
+		const absX = Math.round(x);
+		const absY = Math.round(y);
+		if (!Number.isInteger(absX) || !Number.isInteger(absY)) {
+			die(`rel_to_abs_with_region produced non-integer payload from rel (${rx}, ${ry}) in region (${region.x} ${region.y} ${region.width} ${region.height})`);
+		}
+		return [absX, absY];
+	}
+
+	private makeBasePointFromRel(rx: number, ry: number, region: Region): BaseCoordinatePoint {
+		const [absX, absY] = this.relToAbsWithRegion(rx, ry, region);
+		return { relX: rx, relY: ry, absX, absY };
+	}
+
 	private absToRel(ax: number, ay: number): [number, number] {
 		const region = this.getContentRegion();
 		logPayload("abs_to_rel region", `x=${region.x} y=${region.y} w=${region.width} h=${region.height}`);
@@ -626,17 +833,7 @@ export class AutofillAutomation {
 			die("Could not ensure mirror host before tap sequence.");
 		}
 
-		for (const step of steps.split(";").map(trim).filter((entry) => entry.length > 0)) {
-			const tokens = step.split(",");
-			if (tokens.length !== 2) {
-				die(`Invalid tap sequence step '${step}'. Expected 'x,y'.`);
-			}
-			const [rawRx, rawRy] = tokens;
-			if (rawRx === undefined || rawRy === undefined) {
-				die(`Invalid tap sequence step '${step}'. Expected 'x,y'.`);
-			}
-			const x = validateRelativeToken("x", rawRx);
-			const y = validateRelativeToken("y", rawRy);
+		for (const [x, y] of parseTapSteps(steps, "tap-sequence")) {
 			await this.clickRel(x, y);
 			await sleep(0.15);
 		}
@@ -673,6 +870,81 @@ export class AutofillAutomation {
 		}
 		await this.clickRel(iconRx, iconRy);
 		await sleep(APP_OPEN_DELAY_SEC);
+	}
+
+	private async typeText(text: string): Promise<void> {
+		if (!(await this.ensureMirrorFrontmost("type-text"))) {
+			die("Could not ensure mirroring host before typing text.");
+		}
+
+		for (const ch of text) {
+			this.runCliclick(`t:${escapeTapText(ch)}`);
+			await sleep(0.1);
+		}
+	}
+
+	private getSearchStepsFromProfile(app: SupportedApp): string {
+		const profile = this.getCalibrationProfile();
+		const steps = profile.points.appSearchSteps[app];
+		if (!steps) {
+			die(`No search steps in calibration for app '${app}'.`);
+		}
+		return steps;
+	}
+
+	private getSearchButtonProfilePoint() : BaseCoordinatePoint {
+		return this.getCalibrationProfile().points.homeSearchButton;
+	}
+
+	private getLaunchResultProfilePoint(): BaseCoordinatePoint {
+		return this.getCalibrationProfile().points.launchResultTap;
+	}
+
+	private async openAppBySearch(app: SupportedApp): Promise<void> {
+		const appName = APP_LAUNCH_QUERY[app];
+		const searchPoint = this.getSearchButtonProfilePoint();
+		const launchPoint = this.getLaunchResultProfilePoint();
+
+		if (!(await this.ensureMirrorFrontmost("open-app-by-search:initial-focus"))) {
+			die("Could not ensure mirror host before search launch.");
+		}
+		await this.goHomeBestEffort();
+
+		if (!(await this.ensureMirrorFrontmost("open-app-by-search:search-button"))) {
+			die("Could not ensure mirror host before tapping Search.");
+		}
+		await this.clickRel(searchPoint.relX, searchPoint.relY);
+		await sleep(0.3);
+		await this.clearField();
+		await this.typeText(appName);
+		await sleep(0.35);
+		await this.clickRel(launchPoint.relX, launchPoint.relY);
+		await sleep(APP_OPEN_DELAY_SEC);
+	}
+
+	private async openAppBySearchWithFallback(app: SupportedApp): Promise<void> {
+		try {
+			await this.openAppBySearch(app);
+			return;
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			logStep(`open_app_by_search(${app}) failed: ${message}`);
+			logStep("Falling back to home icon launch");
+		}
+
+		switch (app) {
+			case "chrome":
+				await this.openAppFromHome(CHROME_ICON_RX, CHROME_ICON_RY);
+				break;
+			case "instagram":
+				await this.openAppFromHome(INSTAGRAM_ICON_RX, INSTAGRAM_ICON_RY);
+				break;
+			case "tiktok":
+				await this.openAppFromHome(TIKTOK_ICON_RX, TIKTOK_ICON_RY);
+				break;
+			default:
+				die(`Unknown app: ${app}`);
+		}
 	}
 
 	private async clearField(): Promise<void> {
@@ -731,23 +1003,25 @@ export class AutofillAutomation {
 			die(`Could not return focus to mirror host for ${app} flow.`);
 		}
 		this.logFrontmostState("run-app:post-focus");
+		this.getCalibrationProfile();
+		const steps = this.getSearchStepsFromProfile(app);
 
 		switch (app) {
 			case "chrome":
-				await this.openAppFromHome(CHROME_ICON_RX, CHROME_ICON_RY);
-				await this.tapSequence(CHROME_SEARCH_STEPS);
+				await this.openAppBySearchWithFallback("chrome");
+				await this.tapSequence(steps);
 				await this.clearField();
 				await this.typeAndCapturePerChar("chrome", query, appDir, querySlug);
 				break;
 			case "instagram":
-				await this.openAppFromHome(INSTAGRAM_ICON_RX, INSTAGRAM_ICON_RY);
-				await this.tapSequence(INSTAGRAM_SEARCH_STEPS);
+				await this.openAppBySearchWithFallback("instagram");
+				await this.tapSequence(steps);
 				await this.clearField();
 				await this.typeAndCapturePerChar("instagram", query, appDir, querySlug);
 				break;
 			case "tiktok":
-				await this.openAppFromHome(TIKTOK_ICON_RX, TIKTOK_ICON_RY);
-				await this.tapSequence(TIKTOK_SEARCH_STEPS);
+				await this.openAppBySearchWithFallback("tiktok");
+				await this.tapSequence(steps);
 				await this.clearField();
 				await this.typeAndCapturePerChar("tiktok", query, appDir, querySlug);
 				break;
@@ -769,9 +1043,32 @@ export class AutofillAutomation {
 	public calibrateMode(): void {
 		this.ensurePreflightChecks();
 		this.focusMirroring();
+		const mirrorWindowBounds = this.getMirrorWindowBounds();
+		const mirrorWindow = parseBoundsTuple(mirrorWindowBounds);
+		const contentRegion = this.getContentRegion(mirrorWindowBounds);
+
+		const baseCoordinatesProfile: BaseCoordinatesProfile = {
+			version: 1,
+			generatedAt: new Date().toISOString(),
+			mirrorWindow,
+			contentRegion,
+			points: {
+				homeSearchButton: this.makeBasePointFromRel(APP_HOME_SEARCH_RX, APP_HOME_SEARCH_RY, contentRegion),
+				launchResultTap: this.makeBasePointFromRel(APP_LAUNCH_RESULT_RX, APP_LAUNCH_RESULT_RY, contentRegion),
+				appSearchSteps: {
+					chrome: CHROME_SEARCH_STEPS,
+					instagram: INSTAGRAM_SEARCH_STEPS,
+					tiktok: TIKTOK_SEARCH_STEPS,
+				},
+			},
+		};
+
 		mkdirSync("./calibration", { recursive: true });
 		this.screenshotContent("./calibration/iphone_content.png");
+		writeFileSync(BASE_COORDINATES_FILE, `${JSON.stringify(baseCoordinatesProfile, null, 2)}\n`);
 		console.log("Wrote ./calibration/iphone_content.png");
+		console.log("Wrote ./calibration/base-coordinates.json");
+		this.calibrationProfile = baseCoordinatesProfile;
 	}
 
 	public coordToRelMode(x: number, y: number): void {
