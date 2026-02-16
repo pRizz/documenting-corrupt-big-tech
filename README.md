@@ -215,7 +215,13 @@ It captures `homeSearchButton` first, then each action definition, tapping each 
 bun run capture -- --debug-calibrate-all
 ```
 
-For each high-level step, it logs the expected next action, waits for Enter to execute, then asks for `p` (pass) or `f` (fail). On `f`, it stops immediately and writes a detailed report to:
+For each high-level step, it logs the expected next action, waits for Enter to execute, then asks for `p` (pass) or `f` (fail). App launch transitions are expanded into hierarchical launch sub-steps (for example `4.1`, `4.2`, `4.3`) so typing/submission behavior is visible before execution.
+
+After the Home Search button step, launch uses a context-gated active-Search path first when Search is known to be focused; if that path fails, it falls back to the standard autonomous launch attempts.
+
+Because debug prompts are acknowledged from Terminal, the launch executor now force-refocuses iPhone Mirroring before every launch sub-step (all flows), then records frontmost-process probes in failure reports.
+
+On `f`, it stops immediately and writes a detailed report to:
 
 - `calibration/debug-reports/debug-calibrate-all-failure-<timestamp>.json`
 

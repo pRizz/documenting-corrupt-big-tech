@@ -30,8 +30,9 @@ import {
 } from "./profile-store";
 import type { AutomationSession } from "./session";
 import type { RuntimeAppContext } from "../types";
-import { goHomeBestEffort, openAppBySearchWithFallback, runFlowPostLaunchActions, runSearchEntry } from "./app-launch";
-
+import { goHomeBestEffort, openAppBySearchWithFallback, runSearchEntry } from "./app-launch";
+import { runFlowPostLaunchActions } from "./app-actions";
+import type { AppLaunchContextHint, AppLaunchDebugHooks } from "./app-launch-debug";
 export type CalibrateAllStepKind =
 	| "preflight"
 	| "focus-mirroring"
@@ -39,7 +40,6 @@ export type CalibrateAllStepKind =
 	| "transition-context"
 	| "capture-action-point"
 	| "persist-profile";
-
 export interface CalibrateAllStepDescriptor {
 	index: number;
 	total: number;
@@ -52,28 +52,28 @@ export interface CalibrateAllStepDescriptor {
 	action?: string;
 	targetContext?: ActionContext;
 }
-
 export interface CalibrateAllStepRuntimeState {
 	runtimeContext: RuntimeAppContext;
 	contentRegion?: Region;
 	mirrorWindow?: WindowBounds;
 	currentDefinitionId?: string;
 }
-
 export interface CalibrateAllStepHooks {
 	beforeStep?: (step: CalibrateAllStepDescriptor, state: CalibrateAllStepRuntimeState) => Promise<void> | void;
 	afterStep?: (step: CalibrateAllStepDescriptor, state: CalibrateAllStepRuntimeState) => Promise<void> | void;
 	onStepError?: (step: CalibrateAllStepDescriptor, error: unknown, state: CalibrateAllStepRuntimeState) => Promise<void> | void;
+	buildLaunchDebugHooks?: (step: CalibrateAllStepDescriptor, state: CalibrateAllStepRuntimeState) => AppLaunchDebugHooks | undefined;
 }
-
+interface TransitionToCalibrationContextOptions {
+	actionPoints?: ActionPointsByApp;
+	launchDebugHooks?: AppLaunchDebugHooks;
+}
 export function listAvailableCalibrations(): readonly ActionCalibrationDefinition[] {
 	return ACTION_CALIBRATION_DEFINITIONS.filter((definition) => definition.id.includes(":"));
 }
-
 export function isCalibratableAction(app: SupportedApp, action: string): boolean {
 	return ACTION_CALIBRATION_DEFINITIONS.some((definition) => definition.id === `${app}:${action}`);
 }
-
 function logCalibrationCapture(label: string, sample: ReturnType<typeof queryMouseLocation>, contentRegion: Region): void {
 	const telemetry = buildCalibrationTelemetry(sample, contentRegion);
 	const formatted = formatCalibrationPreview(label, telemetry, contentRegion);
@@ -90,34 +90,28 @@ async function capturePointFromMouse(
 	const sample = queryMouseLocation();
 	const [relX, relY] = absToRelWithinRegion(sample.x, sample.y, contentRegion, label);
 	logCalibrationCapture(label, sample, contentRegion);
-
 	const capturedPoint: BaseCoordinatePoint = {
 		relX,
 		relY,
 		absX: sample.x,
 		absY: sample.y,
 	};
-
 	if (options.tapAfterCapture) {
 		await session.clickRel(capturedPoint.relX, capturedPoint.relY);
 		await sleepAfterAction("calibration-point-tap", CAPTURE_FAST_STEP_GAP_SEC);
 	}
-
 	return capturedPoint;
 }
-
 function makeBasePointFromRel(rx: number, ry: number, region: Region): BaseCoordinatePoint {
 	const [absX, absY] = relToAbsWithRegion(rx, ry, region);
 	return { relX: rx, relY: ry, absX, absY };
 }
-
 function getAllCalibrationDefinitionsForAllMode(): ActionCalibrationDefinition[] {
 	const candidates = ACTION_CALIBRATION_DEFINITIONS.filter((definition) => definition.skipInCalibrateAll !== true);
 	const indexed = new Map<string, ActionCalibrationDefinition>(candidates.map((definition) => [definition.id, definition]));
 	const resolved = new Set<string>();
 	const visiting = new Set<string>();
 	const ordered: ActionCalibrationDefinition[] = [];
-
 	const visit = (definition: ActionCalibrationDefinition): void => {
 		if (resolved.has(definition.id)) {
 			return;
@@ -125,7 +119,6 @@ function getAllCalibrationDefinitionsForAllMode(): ActionCalibrationDefinition[]
 		if (visiting.has(definition.id)) {
 			die(`Circular calibration prerequisite detected: ${definition.id}`);
 		}
-
 		visiting.add(definition.id);
 		for (const rawPrerequisite of definition.prerequisites ?? []) {
 			const prerequisite = indexed.get(rawPrerequisite);
@@ -137,14 +130,11 @@ function getAllCalibrationDefinitionsForAllMode(): ActionCalibrationDefinition[]
 		resolved.add(definition.id);
 		ordered.push(definition);
 	};
-
 	for (const definition of candidates) {
 		visit(definition);
 	}
-
 	return ordered;
 }
-
 function buildStepAllocator(total: number): (step: Omit<CalibrateAllStepDescriptor, "index" | "total">) => CalibrateAllStepDescriptor {
 	let index = 0;
 	return (step) => ({
@@ -153,7 +143,6 @@ function buildStepAllocator(total: number): (step: Omit<CalibrateAllStepDescript
 		...step,
 	});
 }
-
 async function runCalibrateAllStep(
 	step: CalibrateAllStepDescriptor,
 	state: CalibrateAllStepRuntimeState,
@@ -169,50 +158,58 @@ async function runCalibrateAllStep(
 		throw error;
 	}
 }
-
 async function transitionToCalibrationContext(
 	session: AutomationSession,
 	definition: ActionCalibrationDefinition,
 	runtimeContext: RuntimeAppContext,
-	actionPoints?: ActionPointsByApp,
+	options: TransitionToCalibrationContextOptions = {},
 ): Promise<void> {
 	const parsed = parseActionId(definition.id);
 	const app = parsed.app;
 	const flow = getAppFlowDefinition(app);
 	const targetContext: ActionContext = definition.autoNavigateTo ?? "app-active";
-
+	const contextHint: AppLaunchContextHint = runtimeContext.currentContext === "search-entry" ? "search-entry-active" : "unknown";
 	if (runtimeContext.currentApp === app && runtimeContext.currentContext === targetContext) {
 		return;
 	}
-
 	logAction(`transitionToCalibrationContext(${definition.id}): ${runtimeContext.currentContext ?? "none"} -> ${targetContext}`);
 	switch (targetContext) {
 		case "home":
 			await goHomeBestEffort(session);
 			break;
 		case "search-entry":
-			await runSearchEntry(session, app, { actionPoints, stopAfterSearchEntry: true });
+			await runSearchEntry(session, app, { actionPoints: options.actionPoints, stopAfterSearchEntry: true });
 			break;
 		case "app-active":
-			await openAppBySearchWithFallback(session, app, actionPoints);
+			await openAppBySearchWithFallback(session, app, {
+				actionPoints: options.actionPoints,
+				contextHint,
+				debugHooks: options.launchDebugHooks,
+			});
 			break;
 		case "search-focused":
-			await openAppBySearchWithFallback(session, app, actionPoints);
+			await openAppBySearchWithFallback(session, app, {
+				actionPoints: options.actionPoints,
+				contextHint,
+				debugHooks: options.launchDebugHooks,
+			});
 			if ((flow.postLaunchActions?.length ?? 0) > 0) {
-				await runFlowPostLaunchActions(session, app, flow, actionPoints);
+				await runFlowPostLaunchActions(session, app, flow, options.actionPoints);
 			}
 			break;
 		case "custom":
 		default:
 			if (runtimeContext.currentApp !== app) {
-				await openAppBySearchWithFallback(session, app, actionPoints);
+				await openAppBySearchWithFallback(session, app, {
+					actionPoints: options.actionPoints,
+					contextHint,
+					debugHooks: options.launchDebugHooks,
+				});
 			}
 	}
-
 	runtimeContext.currentApp = app;
 	runtimeContext.currentContext = targetContext;
 }
-
 export async function runCalibrateAllWorkflow(session: AutomationSession, hooks: CalibrateAllStepHooks = {}): Promise<void> {
 	const existingProfile = getExistingCalibrationProfile(session);
 	const orderedDefinitions = getAllCalibrationDefinitionsForAllMode();
@@ -221,18 +218,14 @@ export async function runCalibrateAllWorkflow(session: AutomationSession, hooks:
 	};
 	const runtimeContext: RuntimeAppContext = {};
 	session.state.calibrationContext = runtimeContext;
-
 	const runtimeState: CalibrateAllStepRuntimeState = {
 		runtimeContext,
 	};
-
 	const totalSteps = orderedDefinitions.length * 2 + 4;
 	const nextStep = buildStepAllocator(totalSteps);
-
 	let mirrorWindow: WindowBounds | undefined;
 	let contentRegion: Region | undefined;
 	let homeSearchButton: BaseCoordinatePoint | undefined;
-
 	await runCalibrateAllStep(
 		nextStep({
 			id: "preflight-check",
@@ -285,6 +278,8 @@ export async function runCalibrateAllWorkflow(session: AutomationSession, hooks:
 			homeSearchButton = await capturePointFromMouse(session, CALIBRATION_SEARCH_BUTTON_PROMPT, contentRegion, {
 				tapAfterCapture: true,
 			});
+			runtimeContext.currentApp = undefined;
+			runtimeContext.currentContext = "search-entry";
 		},
 	);
 
@@ -292,24 +287,23 @@ export async function runCalibrateAllWorkflow(session: AutomationSession, hooks:
 		const parsed = parseActionId(definition.id);
 		const targetContext = definition.autoNavigateTo ?? "app-active";
 		runtimeState.currentDefinitionId = definition.id;
+		const transitionStep = nextStep({
+			id: `transition:${definition.id}`,
+			kind: "transition-context",
+			label: `Transition context for ${definition.id}`,
+			expected: `Auto-navigate to '${targetContext}' before capturing ${definition.id}.`,
+			definitionId: definition.id,
+			app: parsed.app,
+			action: parsed.action,
+			targetContext,
+		});
 
-		await runCalibrateAllStep(
-			nextStep({
-				id: `transition:${definition.id}`,
-				kind: "transition-context",
-				label: `Transition context for ${definition.id}`,
-				expected: `Auto-navigate to '${targetContext}' before capturing ${definition.id}.`,
-				definitionId: definition.id,
-				app: parsed.app,
-				action: parsed.action,
-				targetContext,
-			}),
-			runtimeState,
-			hooks,
-			async () => {
-				await transitionToCalibrationContext(session, definition, runtimeContext, mergedAppActionPoints);
-			},
-		);
+		await runCalibrateAllStep(transitionStep, runtimeState, hooks, async () => {
+			await transitionToCalibrationContext(session, definition, runtimeContext, {
+				actionPoints: mergedAppActionPoints,
+				launchDebugHooks: hooks.buildLaunchDebugHooks?.(transitionStep, runtimeState),
+			});
+		});
 
 		await runCalibrateAllStep(
 			nextStep({

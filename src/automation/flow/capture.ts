@@ -16,7 +16,8 @@ import { logAction, sleepAfterAction } from "../timing";
 import { mkdirSync } from "node:fs";
 import type { AutomationSession } from "./session";
 import { getCalibrationProfile } from "./profile-store";
-import { openAppBySearchWithFallback, runAppSearchPlacement, runFlowPostLaunchActions } from "./app-launch";
+import { openAppBySearchWithFallback } from "./app-launch";
+import { runAppSearchPlacement, runFlowPostLaunchActions } from "./app-actions";
 
 export async function runAppFlow(
 	session: AutomationSession,
