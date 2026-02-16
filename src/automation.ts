@@ -332,6 +332,8 @@ async function promptAndCapturePoint(label: string, contentRegion: Region): Prom
 	console.log(CALIBRATION_PROMPT_HEADER);
 	console.log(label);
 	console.log("  - Move your mouse pointer over the target point in the mirrored iPhone.");
+	console.log("  - Keep both this terminal and the iPhone mirroring window visible.");
+	console.log("  - Make sure this terminal is focused before pressing Enter.");
 	console.log("  - Press Enter to sample that point.");
 	console.log("  - Press Ctrl+C to cancel.");
 	await new Promise<void>((resolve, reject) => {
