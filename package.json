@@ -1,0 +1,26 @@
+{
+  "name": "documenting-corrupt-big-tech",
+  "module": "src/cli.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "capture": "bun run src/cli.ts",
+    "capture:all": "bun run capture -- --apps chrome,instagram,tiktok",
+    "capture:chrome": "bun run capture -- --apps chrome",
+    "capture:instagram": "bun run capture -- --apps instagram",
+    "capture:tiktok": "bun run capture -- --apps tiktok",
+    "print-window": "bun run capture -- --print-window",
+    "calibrate": "bun run capture -- --calibrate",
+    "coord-to-rel": "bun run capture -- --coord-to-rel",
+    "point-check": "bun run capture -- --point-check",
+    "preflight": "if ! command -v osascript >/dev/null 2>&1; then echo 'Missing: osascript (macOS built-in).'; exit 1; fi; if ! command -v awk >/dev/null 2>&1; then echo 'Missing: awk (macOS built-in).'; exit 1; fi; if ! command -v cliclick >/dev/null 2>&1; then echo 'Missing: cliclick. Install with: brew install cliclick'; exit 1; fi; if ! command -v screencapture >/dev/null 2>&1; then echo 'Missing: screencapture (macOS built-in).'; exit 1; fi; echo 'Preflight checks passed.'",
+    "sanity-capture": "bun run capture -- --apps chrome",
+    "check-mirror": "bun run print-window"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

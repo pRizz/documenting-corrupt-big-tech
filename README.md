@@ -2,22 +2,44 @@
 
 ## iPhone Mirroring autofill capture automation
 
-This repo contains `scripts/iphone-mirror-autofill-capture.sh`, a macOS helper that drives an
-open iPhone Mirroring window and records screenshots of autofill-style search suggestions as characters are
-typed into Chrome, Instagram, and TikTok.
+This repo contains `scripts/iphone-mirror-autofill-capture.sh`, a legacy Bash reference implementation for driving an
+open iPhone Mirroring window and recording screenshots of autofill-style search suggestions as characters are typed
+into Chrome, Instagram, and TikTok.
+
+The canonical automation is now implemented as a Bun + TypeScript CLI in `src/cli.ts`.
 
 ### Prerequisites
 
 - macOS with iPhone Mirroring open
 - Accessibility + Screen Recording enabled for your terminal application
-- Use the stock macOS Terminal.app (recommended first) for permission prompts; some embedded terminals can fail to receive Automation prompts reliably.
+- Use the macOS Terminal.app (recommended first) for permission prompts; some embedded terminals can fail to receive Automation prompts reliably.
 - If using an embedded terminal (Cursor, editors, etc.), grant permissions to that app too.
 - `cliclick` (install with `brew install cliclick`)
 
-### Run
+### Quickstart (Bun)
 
 ```bash
-./scripts/iphone-mirror-autofill-capture.sh --query "pizza" --apps chrome,instagram,tiktok
+bun install
+bun run capture -- --query "pizza" --apps chrome,instagram,tiktok
+```
+
+You can also pass a specific output folder:
+
+```bash
+bun run capture -- --query "pizza" --apps chrome,instagram,tiktok --out ./outdir
+```
+
+### Command examples
+
+```bash
+bun run capture -- --print-window
+bun run capture -- --calibrate
+bun run capture -- --coord-to-rel 100 100
+bun run capture -- --point-check 0.5 0.1
+bun run capture -- --query "a" --apps chrome
+bun run preflight
+bun run check-mirror
+bun run sanity-capture -- --query "a"
 ```
 
 ### Convenience commands (Justfile)
@@ -25,37 +47,43 @@ typed into Chrome, Instagram, and TikTok.
 ```bash
 just capture-all query="pizza"
 just capture-chrome query="pizza" out="./out/chrome_run"
+just capture-instagram query="pizza"
+just capture-tiktok query="pizza"
 just preflight
 just check-mirror
 just check-mirror debug=1
 just sanity-capture query="a"
-just calibrate
 just print-window
 ```
 
+### Legacy bash reference
+
+- `scripts/iphone-mirror-autofill-capture.sh` is kept unchanged as historical/for-audit reference.
+- It is no longer the primary runtime; use `bun run capture ...` for routine execution.
+- Keep the Bash script if you need a quick side-by-side behavior diff.
+
 ### Recommended sanity workflow before full capture
 
-1. `just preflight`
-2. `just check-mirror`
-3. If needed: `just check-mirror debug=1`
+1. `bun run preflight`
+2. `bun run check-mirror`
+3. If needed: `bun run check-mirror debug=1`
 4. Use strict coordinate checks while calibrating:
-   - `PRINT_WINDOW_DEBUG=1 ./scripts/iphone-mirror-autofill-capture.sh --print-window`
-   - `just point-check 0.50 0.10` (replace with any rel coordinate under test)
-5. `just calibrate` (or `--calibrate`) to validate the cropped content area
-6. `just sanity-capture query="a"` for a one-app, minimal capture check
-7. `just capture-all query="..."` once input and taps are stable
+   - `PRINT_WINDOW_DEBUG=1 bun run capture -- --print-window`
+   - `bun run preflight` (or `just preflight`)
+   - `bun run capture -- --point-check 0.50 0.10` (replace with any rel coordinate under test)
+5. `bun run capture -- --calibrate`
+6. `bun run sanity-capture -- --query "a"`
+7. `bun run capture -- --query "pizza" --apps chrome,instagram,tiktok` once input and taps are stable
 
 ### Notes
 
 - App icon positions and search-entry taps are hard-coded for one layout and intended to be calibrated.
-- Use `just calibrate` (or `--calibrate`) to verify the cropped phone content region.
-- Use `--coord-to-rel X Y` while hovering over mirrored points for fine-tuning taps.
+- Use `bun run capture -- --print-window` or `bun run capture -- --calibrate` to validate the cropped content area.
 - If automation fails, rerun after adjusting coordinates and delays.
 - If you see connection errors in an embedded terminal, run the command from macOS Terminal.app after enabling `Accessibility` and `Automation` for Terminal and `System Events`.
-- If using Terminal.app, keep it as the default runner for the initial permission grant flow.
 - For mirror detection issues, run with verbose tracing to show each probe step:
-  - `PRINT_WINDOW_DEBUG=1 ./scripts/iphone-mirror-autofill-capture.sh --print-window`
-- The conversion pipeline is now strict-validated; debug output includes raw rel inputs, computed absolute points, and parsed click payloads when failures occur.
+  - `PRINT_WINDOW_DEBUG=1 bun run capture -- --print-window`
+- The conversion pipeline is strict-validated; debug output includes raw rel inputs, computed absolute points, and parsed click payloads when failures occur.
 - If tracing shows no readable bounds while the phone UI is visible, verify on-screen:
   - select your device in iPhone Mirroring
   - accept pairing prompts on the phone (including passcode)

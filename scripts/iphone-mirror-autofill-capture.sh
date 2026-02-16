@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 
+#
+# Legacy reference implementation; no longer primary runner; kept for audit/comparison.
+# Canonical implementation is now src/cli.ts (Bun + TypeScript).
+# Use for cross-checking behavior only:
+#   bun run capture -- --query "..." --apps chrome,instagram,tiktok
+
 set -euo pipefail
 
 # =========================
