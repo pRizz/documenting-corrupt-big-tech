@@ -8,6 +8,7 @@ export type AppFlowMode =
 	| "calibrate"
 	| "calibrate-action"
 	| "calibrate-all"
+	| "debug-calibrate-all"
 	| "coord-to-rel"
 	| "point-check";
 
@@ -19,6 +20,7 @@ export interface CliConfig {
 	calibrate?: boolean;
 	calibrateAction?: string;
 	calibrateAll?: boolean;
+	debugCalibrateAll?: boolean;
 	coordToRel?: [number, number];
 	pointCheck?: [number, number];
 }

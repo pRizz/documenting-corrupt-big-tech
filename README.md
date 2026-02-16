@@ -41,6 +41,7 @@ bun run capture -- --calibrate-action chrome:searchBar
 bun run capture -- --calibrate-action chrome:ellipsis
 bun run capture -- --calibrate-action chrome:newIncognitoTab
 bun run capture -- --calibrate-all
+bun run capture -- --debug-calibrate-all
 bun run preflight
 bun run check-mirror
 bun run sanity-capture -- --query "a"
@@ -208,6 +209,18 @@ It captures `homeSearchButton` first, then each action definition, tapping each 
 - `calibration/base-coordinates.json`
 - `calibration/base-coordinates.snapshot-<ISO>.json` (automatic backup of any previous profile)
 
+`--debug-calibrate-all` runs the same flow with operator checkpoints:
+
+```bash
+bun run capture -- --debug-calibrate-all
+```
+
+For each high-level step, it logs the expected next action, waits for Enter to execute, then asks for `p` (pass) or `f` (fail). On `f`, it stops immediately and writes a detailed report to:
+
+- `calibration/debug-reports/debug-calibrate-all-failure-<timestamp>.json`
+
+This mode requires an interactive TTY terminal session.
+
 During capture, if `chrome:searchBar` is available, the Chrome flow uses that point before falling back to `appSearchSteps`.
 
 Precedence:
@@ -224,6 +237,7 @@ just calibrate-action app=chrome action=searchBar
 just calibrate-chrome-search-bar
 just calibrate-action-chrome-search-icon
 just calibrate-all
+just debug-calibrate-all
 just calibrate-action-chrome-ellipsis
 just calibrate-action-chrome-new-incognito-tab
 ```
@@ -241,6 +255,7 @@ just check-mirror debug=1
 just install-hooks
 just calibrate
 just calibrate-all
+just debug-calibrate-all
 just calibrate-action app=chrome action=searchBar
 just calibrate-chrome-search-bar
 just calibrate-action-chrome-search-icon

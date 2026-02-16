@@ -1,7 +1,9 @@
 import { SUPPORTED_APPS, type SupportedApp } from "../../utils";
 import { createAutomationSession } from "./session";
 import { runCaptureFlow } from "./capture";
-import { calibrateAction, calibrateAll, calibrateMode, isCalibratableAction, listAvailableCalibrations } from "./calibration";
+import { calibrateAll, isCalibratableAction, listAvailableCalibrations } from "./calibration";
+import { calibrateAction, calibrateMode } from "./calibration-basic";
+import { debugCalibrateAll } from "./calibration-debug";
 import { coordToRelMode, pointCheckMode, printWindowMode, runPreflight } from "./debug";
 
 export type AutomationCommand =
@@ -10,6 +12,7 @@ export type AutomationCommand =
 	| { mode: "calibrate" }
 	| { mode: "calibrate-action"; app: SupportedApp; action: string }
 	| { mode: "calibrate-all" }
+	| { mode: "debug-calibrate-all" }
 	| { mode: "coord-to-rel"; x: number; y: number }
 	| { mode: "point-check"; x: number; y: number }
 	| { mode: "preflight" };
@@ -28,6 +31,8 @@ export async function runAutomationCommand(command: AutomationCommand): Promise<
 			return calibrateAction(session, command.app, command.action);
 		case "calibrate-all":
 			return calibrateAll(session);
+		case "debug-calibrate-all":
+			return debugCalibrateAll(session);
 		case "coord-to-rel":
 			return coordToRelMode(session, command.x, command.y);
 		case "point-check":

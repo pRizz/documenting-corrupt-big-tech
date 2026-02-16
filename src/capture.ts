@@ -135,6 +135,15 @@ export function parseCaptureArgs(argv: string[]): ParsedCapturePlan {
 				config.calibrateAll = true;
 				break;
 			}
+			case "--debug-calibrate-all": {
+				if (explicitModeSet && mode !== "debug-calibrate-all") {
+					die("Only one mode flag may be provided.");
+				}
+				explicitModeSet = true;
+				mode = "debug-calibrate-all";
+				config.debugCalibrateAll = true;
+				break;
+			}
 			case "--coord-to-rel": {
 				if (index + 2 >= argv.length) {
 					die("--coord-to-rel requires X and Y");
@@ -227,6 +236,8 @@ function buildAutomationCommand(plan: ParsedCapturePlan): AutomationCommand {
 		}
 		case "calibrate-all":
 			return { mode: "calibrate-all" };
+		case "debug-calibrate-all":
+			return { mode: "debug-calibrate-all" };
 		case "coord-to-rel": {
 			if (!plan.config.coordToRel) {
 				die("Missing --coord-to-rel arguments.");

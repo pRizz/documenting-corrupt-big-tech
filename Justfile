@@ -69,6 +69,9 @@ calibrate:
 calibrate-all:
   @{{SCRIPT}} -- --calibrate-all
 
+debug-calibrate-all:
+  @{{SCRIPT}} -- --debug-calibrate-all
+
 calibrate-action app action:
   @{{SCRIPT}} -- --calibrate-action "{{app}}:{{action}}"
 
