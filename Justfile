@@ -69,6 +69,12 @@ calibrate-action app action:
 calibrate-chrome-search-bar:
   @{{SCRIPT}} -- --calibrate-action "chrome:searchBar"
 
+calibrate-action-chrome-ellipsis:
+  @{{SCRIPT}} -- --calibrate-action "chrome:ellipsis"
+
+calibrate-action-chrome-new-incognito-tab:
+  @{{SCRIPT}} -- --calibrate-action "chrome:newIncognitoTab"
+
 coord-to-rel x y:
   @{{SCRIPT}} -- --coord-to-rel "{{x}}" "{{y}}"
 

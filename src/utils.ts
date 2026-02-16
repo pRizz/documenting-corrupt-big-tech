@@ -105,6 +105,16 @@ export const TIKTOK_SEARCH_STEPS = "0.92,0.08;0.50,0.12";
 
 export const ACTION_CALIBRATION_DEFINITIONS: ReadonlyArray<ActionCalibrationDefinition> = [
 	{
+		id: "chrome:ellipsis",
+		label: "Chrome ellipsis/options",
+		forApp: "chrome",
+	},
+	{
+		id: "chrome:newIncognitoTab",
+		label: "Chrome new incognito tab",
+		forApp: "chrome",
+	},
+	{
 		id: "chrome:searchBar",
 		label: "Chrome search bar",
 		forApp: "chrome",
@@ -331,7 +341,8 @@ export function formatUsage(): string {
 	Utility:
 	  --print-window         Print iPhone mirroring window bounds and computed content bounds
 	  --calibrate            Interactive calibrate: capture Search button coordinate from mouse and write calibration/base-coordinates.json
-	  --calibrate-action KEY  Calibrate an app action coordinate. Key format: app:action (for now: chrome:searchBar)
+	  --calibrate-action KEY  Calibrate an app action coordinate. Key format: app:action
+	                        Supported: chrome:searchBar, chrome:ellipsis, chrome:newIncognitoTab
 	  --coord-to-rel X Y     Convert absolute screen coordinates to relative (0..1)
 	  --point-check RX RY     Validate relative-to-absolute conversion for debug
 	  -h, --help             Print this help text

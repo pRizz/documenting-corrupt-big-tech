@@ -38,6 +38,8 @@ bun run capture -- --point-check 0.5 0.1
 bun run capture -- --query "a" --apps chrome
 bun run capture -- --calibrate
 bun run capture -- --calibrate-action chrome:searchBar
+bun run capture -- --calibrate-action chrome:ellipsis
+bun run capture -- --calibrate-action chrome:newIncognitoTab
 bun run preflight
 bun run check-mirror
 bun run sanity-capture -- --query "a"
@@ -85,7 +87,11 @@ The Bun runtime now prefers iPhone Mirroring shortcuts, with legacy fallback:
    - if this fails, fallback to tapping the calibrated Search icon
 3. Clear search field and type app name (`Chrome`, `Instagram`, `TikTok`)
 4. Submit the search with Enter so the first search result is selected
-5. Continue with in-app search steps
+5. If app is Chrome, use the calibrated sequence:
+   1. tap Chrome ellipsis/options
+   2. tap `New Incognito Tab`
+   3. tap the calibrated `chrome:searchBar` or fallback to legacy sequence
+6. Continue with in-app search steps
 
 `--calibrate` now captures the Search point interactively:
 
@@ -131,6 +137,8 @@ You can calibrate additional in-app action points and persist them in `calibrati
 Supported action IDs:
 
 - `chrome:searchBar`
+- `chrome:ellipsis`
+- `chrome:newIncognitoTab`
 
 For a new action:
 
@@ -139,25 +147,33 @@ For a new action:
 
 ```bash
 bun run capture -- --calibrate-action chrome:searchBar
+bun run capture -- --calibrate-action chrome:ellipsis
+bun run capture -- --calibrate-action chrome:newIncognitoTab
 ```
 
 3. Move your mouse over the target point and press Enter when ready.
 4. The selected point is stored under:
 
 - `points.appActionPoints.chrome.searchBar`
+- `points.appActionPoints.chrome.ellipsis`
+- `points.appActionPoints.chrome.newIncognitoTab`
 
 During capture, if `chrome:searchBar` is available, the Chrome flow uses that point before falling back to `appSearchSteps`.
 
 Precedence:
 
-1. calibrated action point (highest)
-2. legacy step sequence from `appSearchSteps` (fallback)
+1. Chrome required action points (`chrome:ellipsis`, `chrome:newIncognitoTab`)  
+   - missing either value aborts capture and prints explicit calibration guidance
+2. calibrated optional `chrome:searchBar` (highest)
+3. legacy step sequence from `appSearchSteps` (fallback)
 
 Convenience targets:
 
 ```bash
 just calibrate-action app=chrome action=searchBar
 just calibrate-chrome-search-bar
+just calibrate-action-chrome-ellipsis
+just calibrate-action-chrome-new-incognito-tab
 ```
 
 ### Convenience commands (Justfile)
@@ -173,6 +189,8 @@ just check-mirror debug=1
 just calibrate
 just calibrate-action app=chrome action=searchBar
 just calibrate-chrome-search-bar
+just calibrate-action-chrome-ellipsis
+just calibrate-action-chrome-new-incognito-tab
 just sanity-capture query="a"
 just print-window
 ```

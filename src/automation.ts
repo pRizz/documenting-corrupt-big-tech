@@ -1343,6 +1343,45 @@ export class AutofillAutomation {
 		return appActionPoints[action];
 	}
 
+	private async prepareChromeIncognitoActions(): Promise<void> {
+		const missingRequiredActions: string[] = [];
+
+		const ellipsisDefinition = this.getActionDefinitionForTarget("chrome", "ellipsis");
+		const incognitoDefinition = this.getActionDefinitionForTarget("chrome", "newIncognitoTab");
+		if (!ellipsisDefinition) {
+			die("Missing Chrome calibration definition for 'chrome:ellipsis'.");
+		}
+		if (!incognitoDefinition) {
+			die("Missing Chrome calibration definition for 'chrome:newIncognitoTab'.");
+		}
+
+		const ellipsisPoint = this.getActionPoint("chrome", "ellipsis");
+		if (!ellipsisPoint) {
+			missingRequiredActions.push(ellipsisDefinition.id);
+		}
+
+		const incognitoTabPoint = this.getActionPoint("chrome", "newIncognitoTab");
+		if (!incognitoTabPoint) {
+			missingRequiredActions.push(incognitoDefinition.id);
+		}
+
+		if (missingRequiredActions.length > 0) {
+			const lines = [
+				"Missing required Chrome action calibration points for incognito launch:",
+				...missingRequiredActions.map((missingAction) => `- bun run capture -- --calibrate-action ${missingAction}`),
+			];
+			die(lines.join("\n"));
+		}
+
+		logAction("Chrome incognito flow: tapping Chrome ellipsis");
+		await this.clickRel(ellipsisPoint.relX, ellipsisPoint.relY);
+		await sleepAfterAction("chrome-ellipsis-tap");
+
+		logAction("Chrome incognito flow: tapping Chrome New Incognito Tab");
+		await this.clickRel(incognitoTabPoint.relX, incognitoTabPoint.relY);
+		await sleepAfterAction("chrome-new-incognito-tab-tap");
+	}
+
 	private async openAppBySearch(app: SupportedApp): Promise<void> {
 		logAction(`openAppBySearch(${app}): begin`);
 		const appName = APP_LAUNCH_QUERY[app];
@@ -1497,6 +1536,7 @@ export class AutofillAutomation {
 			case "chrome":
 				logAction(`runAppFlow(${app}): entering chrome flow`);
 				await this.openAppBySearchWithFallback("chrome");
+				await this.prepareChromeIncognitoActions();
 				const chromeSearchBarPoint = this.getActionPoint("chrome", "searchBar");
 				if (chromeSearchBarPoint) {
 					logAction(`runAppFlow(${app}): using calibrated chrome:searchBar point`);
