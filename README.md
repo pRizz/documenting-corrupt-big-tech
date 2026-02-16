@@ -57,10 +57,18 @@ The Bun runtime now opens apps by tapping the iPhone home **Search** button firs
 1. Open the mirrored iPhone and start `bun run capture -- --calibrate`.
 2. Move your mouse so it is over the iPhone **Search** icon.
 3. Press Enter in the terminal when positioned.
-4. The script records both absolute and normalized coordinates into `calibration/base-coordinates.json`:
+4. While you move the mouse, terminal output updates a live single-line telemetry stream showing:
+   - source of raw sample (`osascript` or fallback),
+   - screen absolute coordinates,
+   - active content region,
+   - content-local pixel coordinates,
+   - normalized relative coordinates,
+   - and an `[OUT OF CONTENT REGION]` marker if the cursor is outside the current mirroring content area.
+   - Example: `Calibration preview [Target: iPhone Home Screen Search button]: source=osascript raw={1245, 612} | screen=(1245, 612) | contentRegion=(x=1120, y=84, w=296, h=638) | contentLocal=(125, 528) | rel=(0.422297, 0.827586)`.
+5. Pressing Enter immediately captures the current value and records both absolute and normalized coordinates into `calibration/base-coordinates.json`:
    - `points.homeSearchButton.absX`, `points.homeSearchButton.absY`
    - `points.homeSearchButton.relX`, `points.homeSearchButton.relY`
-5. The command prints the computed mirrored content region before sampling so you can verify the coordinate frame.
+6. The command prints the computed mirrored content region before sampling so you can verify the coordinate frame.
 
 You can re-run calibration later if app layout changes.
 

@@ -72,6 +72,8 @@ export const APP_HOME_SEARCH_RY = 0.91;
 export const APP_LAUNCH_RESULT_RX = 0.5;
 export const APP_LAUNCH_RESULT_RY = 0.63;
 
+export const CALIBRATION_PREVIEW_INTERVAL_MS = 150;
+
 export const CALIBRATION_PROMPT_HEADER = "🔧 Calibration: interactive coordinate capture";
 export const CALIBRATION_SEARCH_BUTTON_PROMPT = "Target: iPhone Home Screen Search button";
 

@@ -1,10 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { clearLine, createInterface, cursorTo, moveCursor } from "node:readline";
 
 import {
 	APP_LAUNCH_QUERY,
 	APP_LAUNCH_RESULT_RX,
 	APP_LAUNCH_RESULT_RY,
+	CALIBRATION_PREVIEW_INTERVAL_MS,
 	APP_OPEN_DELAY_SEC,
 	BACKSPACE_COUNT,
 	BASE_COORDINATES_FILE,
@@ -45,6 +47,29 @@ import {
 import type { Region, SupportedApp, WindowBounds } from "./utils";
 
 export const SUPPORTED_APPS: ReadonlyArray<SupportedApp> = ["chrome", "instagram", "tiktok"];
+
+type MouseLocationSample = {
+	x: number;
+	y: number;
+	source: string;
+	raw: string;
+};
+
+type CalibrationTelemetrySample = {
+	x: number;
+	y: number;
+	relX: number;
+	relY: number;
+	source: string;
+	raw: string;
+	localX: number;
+	localY: number;
+	inBounds: boolean;
+};
+
+type CalibrationTelemetryPanelState = {
+	lines: number;
+};
 
 function asCommandResult(command: string, args: string[]): { exitCode: number; output: string } {
 	const proc = Bun.spawnSync([command, ...args], {
@@ -155,29 +180,213 @@ function parseMouseLocation(raw: string): [number, number] {
 	die(`Unable to parse mouse coordinates from '${raw}'. Expected formats like "{x, y}" or "x, y".`);
 }
 
-function queryMouseLocation(): [number, number] {
+function splitForTerminalWidth(text: string, width: number): string[] {
+	const columns = Math.max(1, Math.floor(width));
+	const paragraphs = text.split("\n");
+	const result: string[] = [];
+	for (const paragraph of paragraphs) {
+		const segmenter =
+			typeof Intl !== "undefined" && "Segmenter" in Intl
+				? new Intl.Segmenter(undefined, { granularity: "grapheme" })
+				: null;
+
+		const graphemes: string[] = [];
+		if (segmenter) {
+			for (const segment of segmenter.segment(paragraph)) {
+				graphemes.push(segment.segment);
+			}
+		} else {
+			for (const segment of paragraph) {
+				graphemes.push(segment);
+			}
+		}
+
+		if (graphemes.length === 0) {
+			result.push("");
+			continue;
+		}
+
+		let cursor = 0;
+		while (cursor < graphemes.length) {
+			const line = graphemes.slice(cursor, cursor + columns).join("");
+			result.push(line);
+			cursor += columns;
+		}
+	}
+
+	return result;
+}
+
+function renderPreviewPanel(text: string, previous: CalibrationTelemetryPanelState): CalibrationTelemetryPanelState {
+	if (!process.stdout.isTTY) {
+		console.log(text);
+		return { lines: 1 };
+	}
+
+	const width = Math.max(20, process.stdout.columns ?? 120);
+	const lines = splitForTerminalWidth(text, width);
+	const targetLines = Math.max(previous.lines, lines.length);
+	const moveUp = Math.max(0, previous.lines - 1);
+
+	if (moveUp > 0) {
+		moveCursor(process.stdout, 0, -moveUp);
+		cursorTo(process.stdout, 0);
+	}
+
+	for (let i = 0; i < targetLines; i += 1) {
+		clearLine(process.stdout, 0);
+		cursorTo(process.stdout, 0);
+		if (i < lines.length) {
+			process.stdout.write(lines[i]);
+		}
+		if (i < targetLines - 1) {
+			process.stdout.write("\n");
+		}
+	}
+
+	cursorTo(process.stdout, 0);
+	return { lines: lines.length };
+}
+
+function resetPreviewPanel(previous: CalibrationTelemetryPanelState): void {
+	if (!process.stdout.isTTY || previous.lines <= 0) {
+		return;
+	}
+
+	const moveUp = Math.max(0, previous.lines - 1);
+	moveCursor(process.stdout, 0, -moveUp);
+	cursorTo(process.stdout, 0);
+	for (let i = 0; i < previous.lines; i += 1) {
+		clearLine(process.stdout, 0);
+		cursorTo(process.stdout, 0);
+		if (i < previous.lines - 1) {
+			process.stdout.write("\n");
+		}
+	}
+}
+
+function buildCalibrationTelemetry(sample: MouseLocationSample, region: Region): CalibrationTelemetrySample {
+	const localX = sample.x - region.x;
+	const localY = sample.y - region.y;
+	const relX = region.width === 0 ? Number.NaN : localX / region.width;
+	const relY = region.height === 0 ? Number.NaN : localY / region.height;
+	const relXSafe = Number.isFinite(relX) ? relX : Number.NaN;
+	const relYSafe = Number.isFinite(relY) ? relY : Number.NaN;
+	const inBounds =
+		Number.isFinite(relXSafe) &&
+		Number.isFinite(relYSafe) &&
+		relXSafe >= 0 &&
+		relXSafe <= 1 &&
+		relYSafe >= 0 &&
+		relYSafe <= 1;
+
+	return {
+		x: sample.x,
+		y: sample.y,
+		relX: relXSafe,
+		relY: relYSafe,
+		source: sample.source,
+		raw: sample.raw,
+		localX,
+		localY,
+		inBounds,
+	};
+}
+
+function formatCalibrationPreview(label: string, sample: CalibrationTelemetrySample, region: Region): string {
+	const relText = Number.isFinite(sample.relX) && Number.isFinite(sample.relY)
+		? `(${sample.relX.toFixed(6)}, ${sample.relY.toFixed(6)})`
+		: "(NaN, NaN)";
+	const boundsText = sample.inBounds ? "" : " [OUT OF CONTENT REGION]";
+	return (
+		`Calibration preview [${label}]: source=${sample.source} raw=${sample.raw} | ` +
+		`screen=(${sample.x}, ${sample.y}) | contentRegion=(x=${region.x}, y=${region.y}, w=${region.width}, h=${region.height}) | ` +
+		`contentLocal=(${sample.localX}, ${sample.localY}) | rel=${relText}${boundsText}`
+	);
+}
+
+function queryMouseLocation(): MouseLocationSample {
 	try {
-		const osaOutput = runOsa(`tell application "System Events"\nset mouseXY to (position of the mouse)\nreturn mouseXY`);
-	return parseMouseLocation(osaOutput);
+		const osaResult = asCommandResult("osascript", [
+			"-e",
+			`tell application "System Events"\nset mouseXY to mouse location\nreturn mouseXY\nend tell`,
+		]);
+		if (osaResult.exitCode !== 0) {
+			throw new Error(trim(osaResult.output));
+		}
+		const osaOutput = trim(osaResult.output);
+		const [x, y] = parseMouseLocation(osaOutput);
+		return { x, y, source: "osascript", raw: osaOutput };
 	} catch {
 		const cliclickResult = asCommandResult("cliclick", ["p"]);
 		if (cliclickResult.exitCode !== 0) {
 			die("Unable to read mouse location. Ensure Accessibility permissions are enabled for Terminal/System Events and try again.");
 		}
-		return parseMouseLocation(trim(cliclickResult.output));
+		const raw = trim(cliclickResult.output);
+		const [x, y] = parseMouseLocation(raw);
+		return { x, y, source: "cliclick", raw };
 	}
 }
 
-function promptAndCapturePoint(label: string): void {
+async function promptAndCapturePoint(label: string, contentRegion: Region): Promise<void> {
 	console.log(CALIBRATION_PROMPT_HEADER);
 	console.log(label);
 	console.log("  - Move your mouse pointer over the target point in the mirrored iPhone.");
 	console.log("  - Press Enter to sample that point.");
 	console.log("  - Press Ctrl+C to cancel.");
-	const chunk = readFileSync(0, "utf8");
-	if (chunk.length === 0) {
-		die("No input received while waiting for calibration confirmation.");
-	}
+	await new Promise<void>((resolve, reject) => {
+		const rl = createInterface({
+			input: process.stdin,
+			output: process.stdout,
+		});
+		let resolved = false;
+		const state: CalibrationTelemetryPanelState = { lines: 0 };
+		let interval: ReturnType<typeof setInterval> | null = null;
+
+		const renderTelemetry = () => {
+			let sample: MouseLocationSample;
+			try {
+				sample = queryMouseLocation();
+			} catch {
+				return;
+			}
+			const telemetry = buildCalibrationTelemetry(sample, contentRegion);
+			const line = formatCalibrationPreview(label, telemetry, contentRegion);
+			state.lines = renderPreviewPanel(line, state).lines;
+		};
+
+		const finalize = (error?: Error) => {
+			if (resolved) return;
+			resolved = true;
+			if (interval !== null) {
+				clearInterval(interval);
+				interval = null;
+			}
+			resetPreviewPanel(state);
+			process.stdout.write("\n");
+			rl.close();
+			if (error) {
+				reject(error);
+				return;
+			}
+			resolve();
+		};
+
+		interval = setInterval(renderTelemetry, CALIBRATION_PREVIEW_INTERVAL_MS);
+		renderTelemetry();
+
+		rl.once("line", () => {
+			finalize();
+		});
+
+		rl.once("close", () => {
+			finalize();
+		});
+
+		rl.on("SIGINT", () => {
+			finalize(new Error("Calibration prompt canceled by user."));
+		});
+	});
 }
 
 export class AutofillAutomation {
@@ -839,6 +1048,7 @@ export class AutofillAutomation {
 			die(
 				[
 					`Captured point for ${label} is outside the current mirrored content region.`,
+					`screen=(${ax}, ${ay}) local=(${ax - region.x}, ${ay - region.y}) region=(x=${region.x}, y=${region.y}, w=${region.width}, h=${region.height}) rel=(${relX}, ${relY})`,
 					"Open iPhone Mirroring, place the pointer directly on the Search button, then rerun:",
 					"bun run capture -- --calibrate",
 				].join(" "),
@@ -847,16 +1057,30 @@ export class AutofillAutomation {
 		return [relX, relY];
 	}
 
-	private captureHomeSearchFromMouse(contentRegion: Region): BaseCoordinatePoint {
-		promptAndCapturePoint(CALIBRATION_SEARCH_BUTTON_PROMPT);
-		const [absX, absY] = queryMouseLocation();
-		const [relX, relY] = this.absToRelWithinRegion(absX, absY, contentRegion, "Search button");
-		console.log(`Captured Search button @ abs(${absX}, ${absY}) => rel(${relX.toFixed(6)}, ${relY.toFixed(6)})`);
+	private logCalibrationCapture(
+		label: string,
+		sample: MouseLocationSample,
+		contentRegion: Region,
+		relX: number,
+		relY: number,
+	): void {
+		const contentLocalX = sample.x - contentRegion.x;
+		const contentLocalY = sample.y - contentRegion.y;
+		console.log(
+			`Calibration sample (${label}): source=${sample.source} raw=${sample.raw} | screen=(${sample.x},${sample.y}) | contentRegion=(x=${contentRegion.x}, y=${contentRegion.y}, w=${contentRegion.width}, h=${contentRegion.height}) | contentLocal=(${contentLocalX}, ${contentLocalY}) | rel=(${relX.toFixed(6)}, ${relY.toFixed(6)})`,
+		);
+	}
+
+	private async captureHomeSearchFromMouse(contentRegion: Region): Promise<BaseCoordinatePoint> {
+		await promptAndCapturePoint(CALIBRATION_SEARCH_BUTTON_PROMPT, contentRegion);
+		const sample = queryMouseLocation();
+		const [relX, relY] = this.absToRelWithinRegion(sample.x, sample.y, contentRegion, "Search button");
+		this.logCalibrationCapture("Search button", sample, contentRegion, relX, relY);
 		return {
 			relX,
 			relY,
-			absX,
-			absY,
+			absX: sample.x,
+			absY: sample.y,
 		};
 	}
 
@@ -1117,7 +1341,7 @@ export class AutofillAutomation {
 		console.log(`content: ${contentRegion.x} ${contentRegion.y} ${contentRegion.width} ${contentRegion.height}`);
 	}
 
-	public calibrateMode(): void {
+	public async calibrateMode(): Promise<void> {
 		this.ensurePreflightChecks();
 		this.focusMirroring();
 		const mirrorWindowBounds = this.getMirrorWindowBounds();
@@ -1126,7 +1350,7 @@ export class AutofillAutomation {
 		console.log(
 			`Using content region: x=${contentRegion.x} y=${contentRegion.y} w=${contentRegion.width} h=${contentRegion.height}`,
 		);
-		const homeSearchButton = this.captureHomeSearchFromMouse(contentRegion);
+		const homeSearchButton = await this.captureHomeSearchFromMouse(contentRegion);
 
 		const baseCoordinatesProfile: BaseCoordinatesProfile = {
 			version: 1,
