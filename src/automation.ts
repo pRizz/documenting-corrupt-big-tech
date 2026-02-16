@@ -1123,6 +1123,9 @@ export class AutofillAutomation {
 		const mirrorWindowBounds = this.getMirrorWindowBounds();
 		const mirrorWindow = parseBoundsTuple(mirrorWindowBounds);
 		const contentRegion = this.getContentRegion(mirrorWindowBounds);
+		console.log(
+			`Using content region: x=${contentRegion.x} y=${contentRegion.y} w=${contentRegion.width} h=${contentRegion.height}`,
+		);
 		const homeSearchButton = this.captureHomeSearchFromMouse(contentRegion);
 
 		const baseCoordinatesProfile: BaseCoordinatesProfile = {

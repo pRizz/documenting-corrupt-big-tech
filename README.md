@@ -60,6 +60,7 @@ The Bun runtime now opens apps by tapping the iPhone home **Search** button firs
 4. The script records both absolute and normalized coordinates into `calibration/base-coordinates.json`:
    - `points.homeSearchButton.absX`, `points.homeSearchButton.absY`
    - `points.homeSearchButton.relX`, `points.homeSearchButton.relY`
+5. The command prints the computed mirrored content region before sampling so you can verify the coordinate frame.
 
 You can re-run calibration later if app layout changes.
 
