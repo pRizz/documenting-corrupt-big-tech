@@ -646,7 +646,8 @@ export class AutofillAutomation {
 			return false;
 		}
 
-		const escaped = keyText.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
+		const normalizedKey = trim(keyText).toLowerCase();
+		const isReturn = normalizedKey === "return" || normalizedKey === "enter" || normalizedKey === "↩" || normalizedKey === "\n" || normalizedKey === "\r";
 		const modifierTokens = trim(modifiersRaw)
 			.split(",")
 			.map(trim)
@@ -676,10 +677,17 @@ export class AutofillAutomation {
 			}
 		}
 
+		if (isReturn && modifierStatements.length > 0) {
+			die(`send_host_keystroke(${context}) does not support modifiers for return/enter keys`);
+		}
+
+		const escaped = keyText.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
 		const modifierPayload = modifierStatements.join(", ");
-		const script = modifierPayload
-			? `tell application "System Events" to keystroke "${escaped}" using {${modifierPayload}}`
-			: `tell application "System Events" to keystroke "${escaped}"`;
+		const script = isReturn
+			? `tell application "System Events" to key code 36`
+			: modifierPayload
+				? `tell application "System Events" to keystroke "${escaped}" using {${modifierPayload}}`
+				: `tell application "System Events" to keystroke "${escaped}"`;
 
 		try {
 			runOsa(script);
@@ -1230,7 +1238,6 @@ export class AutofillAutomation {
 		logAction(`openAppBySearch(${app}): begin`);
 		const appName = APP_LAUNCH_QUERY[app];
 		const searchPoint = this.getSearchButtonProfilePoint();
-		const launchPoint = this.getLaunchResultProfilePoint();
 
 		logAction(`Opening ${app} via Search flow`);
 		logAction(`openAppBySearch(${app}): checking initial frontmost`);
@@ -1261,10 +1268,11 @@ export class AutofillAutomation {
 		await this.typeText(appName);
 		await sleepAfterAction("search-typing");
 		await sleepAfterAction("typing-to-launch");
-		logAction("Tapping launch result");
-		await this.clickRel(launchPoint.relX, launchPoint.relY);
-		logAction(`openAppBySearch(${app}): launch-result tapped`);
-		await sleepAfterAction("launch-result-tap");
+		logAction("Submitting search with Enter");
+		if (!(await this.sendHostKeystroke("return", "", `open-app-by-search:${app}-submit`))) {
+			die(`Could not submit search for ${app}.`);
+		}
+		await sleepAfterAction("search-submit");
 		await sleep(APP_OPEN_DELAY_SEC);
 		logAction(`openAppBySearch(${app}): complete`);
 	}

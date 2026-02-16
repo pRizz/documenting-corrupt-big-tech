@@ -73,7 +73,7 @@ The Bun runtime now opens apps by tapping the iPhone home **Search** button firs
 1. Return to Home
 2. Tap Search button
 3. Clear search field and type app name (`Chrome`, `Instagram`, `TikTok`)
-4. Tap the launch result entry
+4. Submit the search with Enter so the first search result is selected
 5. Continue with in-app search steps
 
 `--calibrate` now captures the Search point interactively:
