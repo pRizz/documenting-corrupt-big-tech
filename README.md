@@ -109,11 +109,14 @@ The Bun runtime now prefers iPhone Mirroring shortcuts, with legacy fallback:
    - if this fails, fallback to tapping the calibrated Search icon
 3. Clear search field and type app name (`Chrome`, `Instagram`, `TikTok`)
 4. Submit the search with Enter so the first search result is selected
-5. If app is Chrome, use the calibrated sequence:
+5. If launch uses shortcut+Enter, run one deterministic tap-only retry before finalizing success
+   - this protects against intermittent search-dismissal where no hard automation error is emitted
+   - if search attempts still fail, fallback to home icon launch
+6. If app is Chrome, use the calibrated sequence:
    1. tap Chrome ellipsis/options
    2. tap `New Incognito Tab`
    3. tap the calibrated `chrome:searchBar` or fallback to legacy sequence
-6. Continue with in-app search steps
+7. Continue with in-app search steps
 
 `--calibrate` now captures the Search point interactively:
 
