@@ -15,7 +15,6 @@ import {
 	type SupportedApp,
 	die,
 	getAppFlowDefinition,
-	logStep,
 } from "../../utils";
 import { asCommandResult } from "../command-bridge";
 import { logAction, sleepAfterAction } from "../timing";
@@ -59,6 +58,9 @@ async function pasteSearchQuery(session: AutomationSession, query: string, label
 	if (!(await session.ensureMirrorFrontmost("search-query-paste:menu-open"))) {
 		die("Could not ensure mirror host before search paste workaround.");
 	}
+	logAction(`Priming Search field focus before paste workaround${label}`);
+	await session.clickRel(SEARCH_PASTE_MENU_FIELD_RX, SEARCH_PASTE_MENU_FIELD_RY);
+	await sleepAfterAction("search-paste-field-focus", CAPTURE_FAST_STEP_GAP_SEC);
 	const [fieldX, fieldY] = session.relToAbs(SEARCH_PASTE_MENU_FIELD_RX, SEARCH_PASTE_MENU_FIELD_RY);
 	session.runCliclick(`rc:${fieldX},${fieldY}`);
 	await sleepAfterAction("search-paste-menu-open", CAPTURE_FAST_STEP_GAP_SEC);
