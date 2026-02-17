@@ -1,4 +1,5 @@
 calibration/
+calibration/debug-checkpoints-*/
 calibration/base-coordinates.snapshot-*.json
 autofill_shots_*/
 node_modules/

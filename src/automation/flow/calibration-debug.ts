@@ -1,7 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { CAPTURE_FAST_STEP_GAP_SEC } from "../../utils";
+import { CAPTURE_FAST_STEP_GAP_SEC, timestampSnapshot } from "../../utils";
 import { asCommandResult } from "../command-bridge";
 import { sleepAfterAction } from "../timing";
 import {
@@ -22,7 +22,7 @@ import {
 import type { AutomationSession } from "./session";
 import type { AppLaunchDebugHooks, AppLaunchDebugStep, AppLaunchStepFocusProbe } from "./app-launch-debug";
 
-const DEBUG_CHECKPOINT_DIR = resolve("./calibration/debug-checkpoints");
+const DEBUG_CHECKPOINT_DIR_PREFIX = "debug-checkpoints";
 const DEBUG_RESUME_BUTTON_REL_X = 0.5;
 const DEBUG_RESUME_BUTTON_REL_Y = 0.58;
 const DEBUG_TOUCHID_WAIT_TIMEOUT_SEC = 25;
@@ -195,6 +195,8 @@ async function promptVerdict(prefix: string): Promise<"pass" | "fail"> {
 export async function debugCalibrateAll(session: AutomationSession): Promise<void> {
 	requireInteractiveTerminal();
 	console.log("[debug-calibrate-all] Starting checkpointed calibration run.");
+	const checkpointRunDir = resolve(`./calibration/${DEBUG_CHECKPOINT_DIR_PREFIX}-${timestampSnapshot()}`);
+	console.log(`[debug-calibrate-all] Checkpoint directory: ${checkpointRunDir}`);
 
 	let latestMainStep: StepSnapshot | undefined;
 	let latestSubStep: LaunchSubStepSnapshot | undefined;
@@ -210,12 +212,12 @@ export async function debugCalibrateAll(session: AutomationSession): Promise<voi
 		checkpointSequence += 1;
 		const indexToken = String(checkpointSequence).padStart(3, "0");
 		const mainToken = `step-${String(mainStep.index).padStart(2, "0")}-${sanitizeCheckpointToken(mainStep.id)}`;
-		const subToken = subStep
-			? `-sub-${sanitizeCheckpointToken(subStep.displayIndex)}-${sanitizeCheckpointToken(subStep.id)}`
-			: "";
-		const screenshotPath = resolve(DEBUG_CHECKPOINT_DIR, `debug-calibrate-all-${indexToken}-${mainToken}${subToken}.png`);
-		try {
-			mkdirSync(DEBUG_CHECKPOINT_DIR, { recursive: true });
+			const subToken = subStep
+				? `-sub-${sanitizeCheckpointToken(subStep.displayIndex)}-${sanitizeCheckpointToken(subStep.id)}`
+				: "";
+			const screenshotPath = resolve(checkpointRunDir, `debug-calibrate-all-${indexToken}-${mainToken}${subToken}.png`);
+			try {
+				mkdirSync(checkpointRunDir, { recursive: true });
 			const ensurePhase = subStep
 				? `debug-calibrate-all:checkpoint:${subStep.id}`
 				: `debug-calibrate-all:checkpoint:${mainStep.id}`;
