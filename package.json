@@ -6,7 +6,7 @@
   "scripts": {
     "lint": "bunx @biomejs/biome lint src scripts",
     "lint:fix": "bunx @biomejs/biome lint --write --unsafe src scripts",
-    "lint:staged:fix": "bun run scripts/lint-staged.ts",
+    "lint:staged:fix": "bunx @biomejs/biome lint --staged --write --unsafe --no-errors-on-unmatched && git diff --name-only --cached --diff-filter=ACMR -z | xargs -0 git add --",
     "typecheck": "bunx tsc --noEmit",
     "typecheck:watch": "bunx tsc --noEmit --watch",
     "check:line-limits": "bun run scripts/check-line-limits.ts",
