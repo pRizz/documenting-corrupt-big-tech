@@ -226,7 +226,7 @@ export async function debugCalibrateAll(session: AutomationSession): Promise<voi
 				console.error(`[debug-calibrate-all] Checkpoint screenshot skipped (could not focus mirror): ${ensurePhase}`);
 				return undefined;
 			}
-			const captureArgs = ["-x"];
+			const captureArgs = ["-x", "-C"];
 			if (state?.contentRegion) {
 				const region = state.contentRegion;
 				captureArgs.push("-R", `${region.x},${region.y},${region.width},${region.height}`);

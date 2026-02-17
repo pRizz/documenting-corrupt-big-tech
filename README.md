@@ -220,6 +220,8 @@ For each high-level step, it logs the expected next action, waits for Enter to e
 Right before every `p/f` prompt, debug mode now captures a checkpoint screenshot and prints its path:
 
 - `calibration/debug-checkpoints-<timestamp>/debug-calibrate-all-<seq>-step-...png`
+- checkpoint captures include the mouse pointer (`screencapture -C`) for easier cursor-state debugging
+  - this is intentional and debug-only; non-debug capture artifacts may not include the pointer
 - When content bounds are not available yet, it captures full-screen and then switches to mirrored-content region captures once bounds are known.
 - At the `Focus iPhone Mirroring` step, you can optionally type `r` to run Resume/TouchID recovery:
   - it clicks the approximate `Resume` button position in mirror content
@@ -234,6 +236,39 @@ On `f`, it stops immediately and writes a detailed report to:
 - `calibration/debug-reports/debug-calibrate-all-failure-<timestamp>.json`
 
 This mode requires an interactive TTY terminal session.
+
+### AI-assisted debug loop (handoff-safe)
+
+Use this loop when an agent is driving `--debug-calibrate-all` and validating each checkpoint screenshot.
+
+First-run note: macOS may prompt for permissions (for example Accessibility and Screen Recording) the first time this flow performs focus control, input events, or screenshots. Accept the prompts, then restart the terminal/agent session if macOS requests it, and rerun the command.
+
+1. Start a fresh run:
+
+```bash
+just debug-calibrate-all
+```
+
+2. For each prompted step/sub-step:
+   - press Enter to execute
+   - wait for the printed checkpoint screenshot path
+   - inspect that screenshot and compare against the step's expected result text
+   - respond with `p` if expected state is visible, otherwise `f`
+3. For interactive point-capture steps, set cursor over target point first, then press Enter to sample.
+4. If mirror shows paused/locked state at the focus step, enter `r` to run Resume recovery, complete TouchID, then continue.
+5. On failure (`f`), stop and capture the report path:
+   - `calibration/debug-reports/debug-calibrate-all-failure-<timestamp>.json`
+6. Use the failure report as source of truth for next fix:
+   - `mainStep` / `subStep` for exact failing action
+   - `checkpointScreenshotPath` for visual confirmation
+   - focus probe fields (`frontmostBeforeFocus`, `frontmostAfterFocus`, `frontmostBeforeAction`, `frontmostAfterAction`)
+7. Implement the smallest fix, rerun `just debug-calibrate-all`, and repeat until the next real failure point.
+
+Each run writes to a unique checkpoint directory:
+
+- `calibration/debug-checkpoints-<timestamp>/...`
+
+Keep this per-run directory and the failure JSON together when handing off to another agent.
 
 During capture, if `chrome:searchBar` is available, the Chrome flow uses that point before falling back to `appSearchSteps`.
 
