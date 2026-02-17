@@ -1,6 +1,9 @@
 import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { CAPTURE_FAST_STEP_GAP_SEC } from "../../utils";
+import { asCommandResult } from "../command-bridge";
+import { sleepAfterAction } from "../timing";
 import {
 	buildFailureReport,
 	buildLaunchSubStepSnapshot,
@@ -20,6 +23,9 @@ import type { AutomationSession } from "./session";
 import type { AppLaunchDebugHooks, AppLaunchDebugStep, AppLaunchStepFocusProbe } from "./app-launch-debug";
 
 const DEBUG_CHECKPOINT_DIR = resolve("./calibration/debug-checkpoints");
+const DEBUG_RESUME_BUTTON_REL_X = 0.5;
+const DEBUG_RESUME_BUTTON_REL_Y = 0.58;
+const DEBUG_TOUCHID_WAIT_TIMEOUT_SEC = 25;
 
 class OperatorMarkedStepFailedError extends Error {
 	readonly mainStep?: StepSnapshot;
@@ -65,25 +71,96 @@ function shouldUseLaunchSubSteps(step: StepSnapshot, state: StateSnapshot): bool
 	return state.runtimeContext.currentApp !== step.app || state.runtimeContext.currentContext !== step.targetContext;
 }
 
-async function promptLine(prompt: string): Promise<string> {
+interface PromptLineOptions {
+	timeoutSec?: number;
+	defaultAnswerOnTimeout?: string;
+}
+
+type CaptureCheckpointScreenshot = (
+	mainStep: StepSnapshot,
+	state: StateSnapshot | undefined,
+	subStep?: LaunchSubStepSnapshot,
+) => Promise<string | undefined>;
+
+function isFocusMirroringStep(step: StepSnapshot): boolean {
+	return step.id === "focus-mirroring";
+}
+
+async function promptLine(prompt: string, options: PromptLineOptions = {}): Promise<string> {
 	return new Promise<string>((resolve, reject) => {
 		const rl = createInterface({ input: process.stdin, output: process.stdout });
 		let settled = false;
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
 		const finish = (callback: () => void) => {
 			if (settled) {
 				return;
 			}
 			settled = true;
+			if (timeoutId !== undefined) {
+				clearTimeout(timeoutId);
+			}
 			rl.close();
 			callback();
 		};
 		rl.question(prompt, (answer) => {
 			finish(() => resolve(answer));
 		});
+		if (options.timeoutSec && options.timeoutSec > 0) {
+			timeoutId = setTimeout(() => {
+				const fallback = options.defaultAnswerOnTimeout ?? "";
+				finish(() => resolve(fallback));
+			}, options.timeoutSec * 1000);
+		}
 		rl.on("SIGINT", () => {
 			finish(() => reject(new Error("debug-calibrate-all canceled by user.")));
 		});
 	});
+}
+
+async function runMirrorResumeRecoveryIfRequested(
+	session: AutomationSession,
+	mainStep: StepSnapshot,
+	state: StateSnapshot | undefined,
+	captureCheckpointScreenshot: CaptureCheckpointScreenshot,
+): Promise<void> {
+	while (true) {
+		const choice = (await promptLine(
+			"[debug-calibrate-all] If mirror shows Resume/Locked, type 'r' then Enter to click Resume; otherwise press Enter to continue: ",
+		))
+			.trim()
+			.toLowerCase();
+		if (!choice) {
+			return;
+		}
+		if (choice !== "r") {
+			console.log("[debug-calibrate-all] Invalid input. Press Enter to skip recovery or type 'r' to run Resume recovery.");
+			continue;
+		}
+		console.log(
+			`[debug-calibrate-all] Running mirror recovery click at rel=(${DEBUG_RESUME_BUTTON_REL_X}, ${DEBUG_RESUME_BUTTON_REL_Y})`,
+		);
+		const ensurePhase = "debug-calibrate-all:resume-recovery";
+		if (!(await session.ensureMirrorFrontmost(ensurePhase))) {
+			throw new Error("Could not focus iPhone Mirroring before Resume recovery click.");
+		}
+		await session.clickRel(DEBUG_RESUME_BUTTON_REL_X, DEBUG_RESUME_BUTTON_REL_Y);
+		await sleepAfterAction("debug-resume-recovery-click", CAPTURE_FAST_STEP_GAP_SEC);
+		const waitResult = await promptLine(
+			`[debug-calibrate-all] Use TouchID now, press Enter when done (auto-continue in ${DEBUG_TOUCHID_WAIT_TIMEOUT_SEC}s): `,
+			{
+				timeoutSec: DEBUG_TOUCHID_WAIT_TIMEOUT_SEC,
+				defaultAnswerOnTimeout: "__timeout__",
+			},
+		);
+		if (waitResult === "__timeout__") {
+			console.log("[debug-calibrate-all] TouchID wait timed out; continuing recovery flow.");
+		}
+		const recoveryScreenshotPath = await captureCheckpointScreenshot(mainStep, state);
+		if (recoveryScreenshotPath) {
+			console.log(`[debug-calibrate-all] Post-recovery checkpoint screenshot: ${recoveryScreenshotPath}`);
+		}
+		return;
+	}
 }
 
 async function waitForEnterStep(step: StepSnapshot): Promise<void> {
@@ -125,7 +202,11 @@ export async function debugCalibrateAll(session: AutomationSession): Promise<voi
 	let operatorVerdict: "pass" | "fail" | "not-recorded" = "not-recorded";
 	let checkpointSequence = 0;
 
-	const captureCheckpointScreenshot = async (mainStep: StepSnapshot, subStep?: LaunchSubStepSnapshot): Promise<string | undefined> => {
+	const captureCheckpointScreenshot = async (
+		mainStep: StepSnapshot,
+		state: StateSnapshot | undefined,
+		subStep?: LaunchSubStepSnapshot,
+	): Promise<string | undefined> => {
 		checkpointSequence += 1;
 		const indexToken = String(checkpointSequence).padStart(3, "0");
 		const mainToken = `step-${String(mainStep.index).padStart(2, "0")}-${sanitizeCheckpointToken(mainStep.id)}`;
@@ -143,7 +224,19 @@ export async function debugCalibrateAll(session: AutomationSession): Promise<voi
 				console.error(`[debug-calibrate-all] Checkpoint screenshot skipped (could not focus mirror): ${ensurePhase}`);
 				return undefined;
 			}
-			session.screenshotContent(screenshotPath);
+			const captureArgs = ["-x"];
+			if (state?.contentRegion) {
+				const region = state.contentRegion;
+				captureArgs.push("-R", `${region.x},${region.y},${region.width},${region.height}`);
+			}
+			captureArgs.push(screenshotPath);
+			const captureResult = asCommandResult("screencapture", captureArgs);
+			if (captureResult.exitCode !== 0) {
+				console.error(
+					`[debug-calibrate-all] Failed to capture checkpoint screenshot: ${captureResult.output.trim() || "unknown screencapture error"}`,
+				);
+				return undefined;
+			}
 			console.log(`[debug-calibrate-all] Checkpoint screenshot: ${screenshotPath}`);
 			return screenshotPath;
 		} catch (error) {
@@ -167,22 +260,25 @@ export async function debugCalibrateAll(session: AutomationSession): Promise<voi
 		afterStep: async (step, state) => {
 			latestMainStep = cloneStep(step);
 			latestState = cloneState(state);
-				if (shouldUseLaunchSubSteps(latestMainStep, latestState)) {
-					if (operatorVerdict === "not-recorded") {
-						operatorVerdict = "pass";
-					}
-					return;
-				}
-				const screenshotPath = await captureCheckpointScreenshot(latestMainStep);
-				if (screenshotPath) {
-					latestMainStep = {
-						...latestMainStep,
-						checkpointScreenshotPath: screenshotPath,
-					};
-				}
-				const verdict = await promptVerdict(`[debug-calibrate-all] Step ${latestMainStep.index}/${latestMainStep.total} result?`);
-				if (verdict === "pass") {
+			if (shouldUseLaunchSubSteps(latestMainStep, latestState)) {
+				if (operatorVerdict === "not-recorded") {
 					operatorVerdict = "pass";
+				}
+				return;
+			}
+			if (isFocusMirroringStep(latestMainStep)) {
+				await runMirrorResumeRecoveryIfRequested(session, latestMainStep, latestState, captureCheckpointScreenshot);
+			}
+			const screenshotPath = await captureCheckpointScreenshot(latestMainStep, latestState);
+			if (screenshotPath) {
+				latestMainStep = {
+					...latestMainStep,
+					checkpointScreenshotPath: screenshotPath,
+				};
+			}
+			const verdict = await promptVerdict(`[debug-calibrate-all] Step ${latestMainStep.index}/${latestMainStep.total} result?`);
+			if (verdict === "pass") {
+				operatorVerdict = "pass";
 				return;
 			}
 			operatorVerdict = "fail";
@@ -214,7 +310,7 @@ export async function debugCalibrateAll(session: AutomationSession): Promise<voi
 					latestMainStep = mainStep;
 					latestState = mainState;
 					let current = snapshotSubStep(launchStep, focusProbe);
-					const screenshotPath = await captureCheckpointScreenshot(mainStep, current);
+					const screenshotPath = await captureCheckpointScreenshot(mainStep, mainState, current);
 					if (screenshotPath) {
 						current = {
 							...current,

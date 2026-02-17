@@ -220,6 +220,10 @@ For each high-level step, it logs the expected next action, waits for Enter to e
 Right before every `p/f` prompt, debug mode now captures a checkpoint screenshot and prints its path:
 
 - `calibration/debug-checkpoints/debug-calibrate-all-<seq>-step-...png`
+- When content bounds are not available yet, it captures full-screen and then switches to mirrored-content region captures once bounds are known.
+- At the `Focus iPhone Mirroring` step, you can optionally type `r` to run Resume/TouchID recovery:
+  - it clicks the approximate `Resume` button position in mirror content
+  - then waits for TouchID confirmation (press Enter) with auto-continue timeout fallback
 
 After the Home Search button step, launch uses a context-gated active-Search path first when Search is known to be focused; if that path fails, it falls back to the standard autonomous launch attempts.
 
