@@ -4,10 +4,13 @@
   "type": "module",
   "private": true,
   "scripts": {
+    "lint": "bunx @biomejs/biome lint src scripts",
+    "lint:fix": "bunx @biomejs/biome lint --write --unsafe src scripts",
+    "lint:staged:fix": "bun run scripts/lint-staged.ts",
     "typecheck": "bunx tsc --noEmit",
     "typecheck:watch": "bunx tsc --noEmit --watch",
     "check:line-limits": "bun run scripts/check-line-limits.ts",
-    "pre-commit": "bun run check:line-limits && bun run typecheck && bun run preflight",
+    "pre-commit": "bun run lint:staged:fix && bun run check:line-limits && bun run typecheck && bun run preflight",
     "capture": "bun run src/cli.ts",
     "capture:all": "bun run capture -- --apps chrome,instagram,tiktok",
     "capture:chrome": "bun run capture -- --apps chrome",
@@ -22,6 +25,7 @@
     "check-mirror": "bun run print-window"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.2.4",
     "@types/bun": "latest",
     "typescript": "^5.9.3"
   },

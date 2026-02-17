@@ -61,6 +61,8 @@ After setup, each commit runs:
 bun run pre-commit
 ```
 
+`pre-commit` now includes a staged-file lint pass with auto-fix (`Biome lint --write --unsafe`) before line limits, typecheck, and preflight checks.
+
 You can also run it manually at any time:
 
 ```bash
