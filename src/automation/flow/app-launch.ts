@@ -17,6 +17,7 @@ import {
 } from "./app-launch-debug";
 import { runLaunchStepWithFocus as runLaunchDebugStep } from "./app-launch-step-runner";
 import {
+	enterSearchQuery,
 	getLaunchResultProfilePoint,
 	runSearchEntry,
 	openAppFromHome,
@@ -171,13 +172,11 @@ async function openAppBySearch(
 		id: `type-query:${app}:attempt-${attempt.number}`,
 		kind: "type-query",
 		label: `Type '${appName}' (${label})`,
-		expected: `Type '${appName}' into Search.`,
+		expected: `Enter '${appName}' into Search.`,
 		attemptNumber: attempt.number,
 		attemptMode,
 	}, async () => {
-		await session.typeText(appName, CAPTURE_FAST_STEP_GAP_SEC);
-		await sleepAfterAction("search-typing", CAPTURE_FAST_STEP_GAP_SEC);
-		await sleepAfterAction("typing-to-launch", CAPTURE_FAST_STEP_GAP_SEC);
+		await enterSearchQuery(session, appName, { attemptLabel: label });
 	});
 
 	await runLaunchDebugStep(session, options.debugHooks, app, options.contextHint, {
@@ -220,12 +219,10 @@ async function launchFromActiveSearchContext(
 		id: `type-query:${app}:active-search`,
 		kind: "type-query",
 		label: `Type '${appName}' (active context)`,
-		expected: `Type '${appName}' into active Search field.`,
+		expected: `Enter '${appName}' into active Search field.`,
 		attemptMode,
 	}, async () => {
-		await session.typeText(appName, CAPTURE_FAST_STEP_GAP_SEC);
-		await sleepAfterAction("search-typing", CAPTURE_FAST_STEP_GAP_SEC);
-		await sleepAfterAction("typing-to-launch", CAPTURE_FAST_STEP_GAP_SEC);
+		await enterSearchQuery(session, appName, { attemptLabel: attemptMode });
 	});
 
 	if (flow.launch === "searchIcon") {

@@ -245,7 +245,7 @@ export async function runCalibrateAllWorkflow(session: AutomationSession, hooks:
 			id: "focus-mirroring",
 			kind: "focus-mirroring",
 			label: "Focus iPhone Mirroring",
-			expected: "Bring iPhone Mirroring frontmost and compute mirror/content bounds.",
+			expected: "Bring iPhone Mirroring frontmost, compute mirror/content bounds, and force Home before capture.",
 		}),
 		runtimeState,
 		hooks,
@@ -256,6 +256,10 @@ export async function runCalibrateAllWorkflow(session: AutomationSession, hooks:
 			contentRegion = session.getContentRegion(mirrorWindowBounds);
 			runtimeState.mirrorWindow = mirrorWindow;
 			runtimeState.contentRegion = contentRegion;
+			await goHomeBestEffort(session);
+			runtimeContext.currentApp = undefined;
+			runtimeContext.currentContext = "home";
+			await sleepAfterAction("calibrate-all-home-baseline", CAPTURE_FAST_STEP_GAP_SEC);
 			console.log("Calibrating all supported action points.");
 			console.log(`Using content region: x=${contentRegion.x} y=${contentRegion.y} w=${contentRegion.width} h=${contentRegion.height}`);
 			console.log(`Total actions to capture: ${orderedDefinitions.length}`);

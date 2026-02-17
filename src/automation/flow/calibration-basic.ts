@@ -24,6 +24,7 @@ import {
 	persistCalibrationProfile,
 	updateActionPointInProfile,
 } from "./profile-store";
+import { goHomeBestEffort } from "./app-launch";
 import type { AutomationSession } from "./session";
 
 function logCalibrationCapture(label: string, sample: ReturnType<typeof queryMouseLocation>, contentRegion: Region): void {
@@ -66,6 +67,7 @@ function makeBasePointFromRel(rx: number, ry: number, region: Region): BaseCoord
 export async function calibrateMode(session: AutomationSession): Promise<void> {
 	session.ensurePreflightChecks();
 	session.focusMirroring();
+	await goHomeBestEffort(session);
 	const mirrorWindowBounds = session.getMirrorWindowBounds();
 	const mirrorWindow = parseBoundsTuple(mirrorWindowBounds);
 	const contentRegion = session.getContentRegion(mirrorWindowBounds);

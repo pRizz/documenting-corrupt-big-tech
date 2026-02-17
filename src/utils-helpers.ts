@@ -108,6 +108,31 @@ export const CAPTURE_USE_MIRROR_SHORTCUTS = (() => {
 	return true;
 })();
 
+export const CAPTURE_USE_SEARCH_PASTE_WORKAROUND = (() => {
+	const raw = process.env.CAPTURE_USE_SEARCH_PASTE_WORKAROUND;
+	if (raw === undefined || raw.length === 0) {
+		return false;
+	}
+	const lowered = raw.toLowerCase();
+	if (raw.length === 1 && (raw === "1" || raw === "0")) {
+		return raw === "1";
+	}
+	if (["true", "yes", "on", "enabled"].includes(lowered)) {
+		return true;
+	}
+	if (["false", "no", "off", "disabled", "0"].includes(lowered)) {
+		return false;
+	}
+	const parsed = Number(raw);
+	if (Number.isFinite(parsed)) {
+		return parsed !== 0;
+	}
+	if (PRINT_WINDOW_DEBUG) {
+		console.error(`[${LOG_PREFIX}] Invalid CAPTURE_USE_SEARCH_PASTE_WORKAROUND='${raw}', using default false.`);
+	}
+	return false;
+})();
+
 export function parseNumberToken(label: string, token: string): number {
 	const normalized = trim(token);
 	if (normalized.length === 0) {

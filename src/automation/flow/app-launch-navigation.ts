@@ -2,6 +2,7 @@ import {
 	APP_LAUNCH_QUERY,
 	CAPTURE_FAST_STEP_GAP_SEC,
 	CAPTURE_USE_MIRROR_SHORTCUTS,
+	CAPTURE_USE_SEARCH_PASTE_WORKAROUND,
 	CHROME_ICON_RX,
 	CHROME_ICON_RY,
 	INSTAGRAM_ICON_RX,
@@ -16,6 +17,7 @@ import {
 	getAppFlowDefinition,
 	logStep,
 } from "../../utils";
+import { asCommandResult } from "../command-bridge";
 import { logAction, sleepAfterAction } from "../timing";
 import type { AutomationSession } from "./session";
 import { getCalibrationProfile } from "./profile-store";
@@ -29,6 +31,57 @@ export interface RunSearchEntryOptions {
 
 export interface SearchEntryResult {
 	usedSearchShortcut: boolean;
+}
+
+interface EnterSearchQueryOptions {
+	attemptLabel?: string;
+}
+
+const SEARCH_PASTE_MENU_FIELD_RX = 0.22;
+const SEARCH_PASTE_MENU_FIELD_RY = 0.95;
+const SEARCH_PASTE_MENU_ITEM_RX = 0.5;
+const SEARCH_PASTE_MENU_ITEM_RY = 0.83;
+
+function escapeAppleScriptText(raw: string): string {
+	return raw.replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
+}
+
+function setClipboardText(value: string): void {
+	const result = asCommandResult("osascript", ["-e", `set the clipboard to "${escapeAppleScriptText(value)}"`]);
+	if (result.exitCode !== 0) {
+		die(`Could not set clipboard text for search paste workaround: ${result.output.trim()}`);
+	}
+}
+
+async function pasteSearchQuery(session: AutomationSession, query: string, label = ""): Promise<void> {
+	logAction(`Applying search paste workaround${label}`);
+	setClipboardText(query);
+	if (!(await session.ensureMirrorFrontmost("search-query-paste:menu-open"))) {
+		die("Could not ensure mirror host before search paste workaround.");
+	}
+	const [fieldX, fieldY] = session.relToAbs(SEARCH_PASTE_MENU_FIELD_RX, SEARCH_PASTE_MENU_FIELD_RY);
+	session.runCliclick(`rc:${fieldX},${fieldY}`);
+	await sleepAfterAction("search-paste-menu-open", CAPTURE_FAST_STEP_GAP_SEC);
+	await session.clickRel(SEARCH_PASTE_MENU_ITEM_RX, SEARCH_PASTE_MENU_ITEM_RY);
+	await sleepAfterAction("search-paste-apply", CAPTURE_FAST_STEP_GAP_SEC);
+}
+
+export async function enterSearchQuery(
+	session: AutomationSession,
+	query: string,
+	options: EnterSearchQueryOptions = {},
+): Promise<void> {
+	const label = options.attemptLabel ? ` [${options.attemptLabel}]` : "";
+	if (CAPTURE_USE_SEARCH_PASTE_WORKAROUND) {
+		await pasteSearchQuery(session, query, label);
+		await sleepAfterAction("search-typing", CAPTURE_FAST_STEP_GAP_SEC);
+		await sleepAfterAction("typing-to-launch", CAPTURE_FAST_STEP_GAP_SEC);
+		return;
+	}
+	logAction(`Typing app name '${query}'${label}`);
+	await session.typeText(query, CAPTURE_FAST_STEP_GAP_SEC);
+	await sleepAfterAction("search-typing", CAPTURE_FAST_STEP_GAP_SEC);
+	await sleepAfterAction("typing-to-launch", CAPTURE_FAST_STEP_GAP_SEC);
 }
 
 export function getActionPoint(session: AutomationSession, app: SupportedApp, action: string, appActionPoints?: ActionPointsByApp) {
@@ -162,9 +215,6 @@ export async function runSearchEntry(session: AutomationSession, app: SupportedA
 	logAction(`runSearchEntry(${app})${label}: clearing Search field`);
 	await session.clearField();
 	await sleepAfterAction("search-clear", CAPTURE_FAST_STEP_GAP_SEC);
-	logAction(`Typing app name '${appName}'${label}`);
-	await session.typeText(appName, CAPTURE_FAST_STEP_GAP_SEC);
-	await sleepAfterAction("search-typing", CAPTURE_FAST_STEP_GAP_SEC);
-	await sleepAfterAction("typing-to-launch", CAPTURE_FAST_STEP_GAP_SEC);
+	await enterSearchQuery(session, appName, { attemptLabel: options.attemptLabel });
 	return { usedSearchShortcut };
 }
